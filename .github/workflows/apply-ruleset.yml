@@ -1,0 +1,100 @@
+# rulesets/ のテンプレートを、指定したリポジトリへ取り込む。
+#
+# 使い方: Actions → 「ルールセットを適用」→ Run workflow
+#   repo           … 対象のリポジトリ名 (例: nox-apk-manager)。all で全リポジトリ
+#   ruleset        … 取り込むテンプレート
+#   required_check … CI の必須チェック名 (例: 単体テストとビルド)。空なら付けない
+#
+# 同じ名前のルールセットが既にあれば上書きするので、何度流しても同じ結果になる。
+#
+# GITHUB_TOKEN ではほかのリポジトリの設定を変えられないので、
+# Administration: Read and write を持つ fine-grained トークンを
+# Secret の RULESET_TOKEN に入れておく (README 参照)。
+name: ルールセットを適用
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "対象のリポジトリ名 (all で全リポジトリ)"
+        required: true
+      ruleset:
+        description: "テンプレート"
+        type: choice
+        options:
+          - rulesets/protect-default-branch.json
+        default: rulesets/protect-default-branch.json
+      required_check:
+        description: "CI の必須チェック名 (空なら付けない)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 適用
+        env:
+          GH_TOKEN: ${{ secrets.RULESET_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ inputs.repo }}
+          RULESET: ${{ inputs.ruleset }}
+          REQUIRED_CHECK: ${{ inputs.required_check }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Secret RULESET_TOKEN が未設定。README の手順で登録する"
+            exit 1
+          fi
+
+          # 必須チェック名はリポジトリごとに違うので、全リポジトリには付けられない。
+          if [ "$REPO" = "all" ] && [ -n "$REQUIRED_CHECK" ]; then
+            echo "::error::all のときは required_check を空にする"
+            exit 1
+          fi
+
+          body=$(jq --arg check "$REQUIRED_CHECK" '
+            if $check == "" then . else
+              .rules += [{
+                type: "required_status_checks",
+                parameters: {
+                  strict_required_status_checks_policy: false,
+                  required_status_checks: [{ context: $check }]
+                }
+              }]
+            end' "$RULESET")
+          name=$(jq -r '.name' <<<"$body")
+
+          if [ "$REPO" = "all" ]; then
+            targets=$(gh repo list "$OWNER" --source --no-archived --limit 1000 --json name --jq '.[].name')
+          else
+            targets=$REPO
+          fi
+
+          failed=()
+          for repo in $targets; do
+            id=$(gh api "repos/$OWNER/$repo/rulesets" --jq ".[] | select(.name == \"$name\") | .id" 2>/dev/null || true)
+            if [ -n "$id" ]; then
+              method=PUT; path="repos/$OWNER/$repo/rulesets/$id"; label=更新
+            else
+              method=POST; path="repos/$OWNER/$repo/rulesets"; label=作成
+            fi
+            if out=$(gh api -X "$method" "$path" --input - <<<"$body" 2>&1); then
+              echo "✅ $repo: $label"
+            else
+              # 非公開リポジトリは GitHub Free だとルールセットが使えず 403 になる。
+              echo "::warning::$repo: 失敗 ($out)"
+              failed+=("$repo")
+            fi
+          done
+
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::失敗したリポジトリ: ${failed[*]}"
+            exit 1
+          fi
