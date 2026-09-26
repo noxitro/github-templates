@@ -10,6 +10,30 @@
 | パス | 内容 |
 |---|---|
 | `rulesets/protect-default-branch.json` | 既定ブランチ (`main` など) を守るルールセット |
+| `.github/workflows/apply-ruleset.yml` | 上のテンプレートを指定リポジトリへ取り込む Actions |
+
+## ブラウザだけで取り込む (Actions)
+
+### 最初に 1 回だけ: トークンを登録
+
+GitHub Actions の標準トークンではほかのリポジトリの設定を変えられないので、専用のトークンを作る。
+
+1. **Settings (自分のアカウント) → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**
+   - Repository access: **All repositories**
+   - Permissions → Repository permissions → **Administration: Read and write**
+   - 有効期限は好みで。切れたら作り直して Secret を差し替える
+2. このリポジトリの **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `RULESET_TOKEN`
+   - Secret: 1 で作ったトークン
+
+### 取り込むたびに
+
+1. このリポジトリの **Actions → ルールセットを適用 → Run workflow**
+2. 入力して実行
+   - `repo`: 対象のリポジトリ名 (例: `nox-apk-manager`)。`all` なら全リポジトリ (フォークとアーカイブ済みは除く)
+   - `required_check`: CI の必須チェック名 (例: `単体テストとビルド`)。空なら付けない。`all` のときは空にする
+
+同じ名前のルールセットが既にあれば上書きするので、テンプレートを直したあとに流し直せば全リポジトリへ反映できる。
 
 ## rulesets/protect-default-branch.json
 
@@ -23,7 +47,7 @@
 | PR 必須 | ON、承認数 0 | 直接 push を防ぐ。承認を 1 以上にすると自分の PR を自分で承認できず詰まる |
 | 回避できる人 | リポジトリ管理者 (`actor_id: 5`) | 緊急時に自分だけは回避できる |
 
-### 取り込み方
+### 画面から手で取り込む場合
 
 1. 対象リポジトリの **Settings → Rules → Rulesets**
 2. **New ruleset ▾ → Import a ruleset** でこの JSON を選ぶ
