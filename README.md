@@ -11,6 +11,9 @@
 |---|---|
 | `rulesets/protect-default-branch.json` | 既定ブランチ (`main` など) を守るルールセット |
 | `.github/workflows/apply-ruleset.yml` | 上のテンプレートを指定リポジトリへ取り込む Actions |
+| `agent-rules/rules.md` | AI エージェント (Claude Code・GitHub Copilot・opencode) 向けのルール。PR などを原則日本語で書く |
+| `.github/workflows/apply-agent-rules.yml` | 上のルールを指定リポジトリへ PR で配る Actions |
+| `scripts/apply_agent_rules.py` | ルールをリポジトリのファイルに入れる処理 (Actions から使う。手元でも動く) |
 
 ## ブラウザだけで取り込む (Actions)
 
@@ -21,6 +24,7 @@ GitHub Actions の標準トークンではほかのリポジトリの設定を�
 1. **Settings (自分のアカウント) → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**
    - Repository access: **All repositories**
    - Permissions → Repository permissions → **Administration: Read and write**
+   - エージェントのルールも配るなら、さらに **Contents: Read and write** と **Pull requests: Read and write**
    - 有効期限は好みで。切れたら作り直して Secret を差し替える
 2. このリポジトリの **Settings → Secrets and variables → Actions → New repository secret**
    - Name: `RULESET_TOKEN`
@@ -65,3 +69,42 @@ CI のジョブ名はリポジトリごとに違うので、テンプレート�
 
 一度も CI が走っていないとジョブ名が候補に出ない。先に PR か push で CI を 1 回走らせておく。
 存在しないジョブ名を指定すると、チェックが永遠に来ずマージできなくなるので注意。
+
+## agent-rules/rules.md (AI エージェント向けのルール)
+
+PR・コミットメッセージ・レビューのコメントなど、人が読む文章を原則日本語で書くルール。
+ツールごとに読むファイルが違うので、配るときは次の 3 つに入れる。
+
+| ファイル | 読むツール | 入れ方 |
+|---|---|---|
+| `AGENTS.md` | opencode など | 目印のコメントで囲んだ部分だけを入れるか差し替える |
+| `.github/copilot-instructions.md` | GitHub Copilot (チャット・コードレビュー・コーディングエージェント) | 同上 (Copilot はほかのファイルを読み込めないので写しを置く) |
+| `CLAUDE.md` | Claude Code | `@AGENTS.md` (AGENTS.md を読み込む行) がなければ先頭に足す |
+
+目印の外はそのまま残すので、リポジトリ独自のルールは目印の外に書く。
+ルールを変えるときは `agent-rules/rules.md` を直して、もう一度配る。
+
+### 配る (Actions)
+
+1. トークンに Contents と Pull requests の権限を付けておく (上の「トークンを登録」)
+2. このリポジトリの **Actions → エージェントのルールを配る → Run workflow**
+3. `repo` に対象のリポジトリ名を入れて実行。`all` なら全リポジトリ (フォーク・アーカイブ済み・空のリポジトリは除く)
+
+変更があるリポジトリには、ブランチ `agent-rules` から PR ができる。既定ブランチは PR 必須なので、各リポジトリで PR をマージする。
+PR が開いたまま流し直すと、その PR が更新される。
+
+手元で入れるなら `python3 scripts/apply_agent_rules.py <リポジトリのディレクトリ>`。
+
+### リポジトリの外 (個人の設定)
+
+リポジトリに置いたルールは、そのリポジトリの中でしか効かない。どのリポジトリでも効かせたいときは、各ツールの個人の設定にも同じ内容を書く。
+
+| ツール | 場所 |
+|---|---|
+| Claude Code (手元) | `~/.claude/CLAUDE.md` |
+| Claude Code (クラウド) | 環境の設定の Setup script で `~/.claude/CLAUDE.md` を作る |
+| opencode | `~/.config/opencode/AGENTS.md` (なければ `~/.claude/CLAUDE.md` を読む) |
+| GitHub Copilot (github.com のチャット) | Copilot の設定の Personal instructions |
+| GitHub Copilot (VS Code) | ユーザー設定の `github.copilot.chat.*.instructions` (コミットメッセージと PR の説明は別の設定) |
+
+GitHub 上で動く Copilot のコードレビューとコーディングエージェントは個人の設定を読まないので、リポジトリに配っておく。

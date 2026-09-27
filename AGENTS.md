@@ -1,0 +1,24 @@
+# AI エージェント向けのルール
+
+Claude Code・GitHub Copilot・opencode など、このリポジトリで作業する AI エージェントに共通のルールです。
+（Claude Code は `CLAUDE.md` から、Copilot は `.github/copilot-instructions.md` からこのルールを読みます）
+
+<!-- github-templates:agent-rules:start（github-templates の agent-rules/rules.md から配っている部分。ここは直接直さない） -->
+## 言語
+
+人が読む文章は、原則として日本語で書きます。
+
+- PR のタイトルと本文
+- レビューのコメントと返信、Issue とそのコメント
+- コミットメッセージ（1 行目の要約も含む）
+- コードのコメント、README などのドキュメント
+
+次のものは英語のままでかまいません。
+
+- クラス名・関数名・変数名などの識別子、コマンド、ファイルパス
+- ログやエラーメッセージの引用、ライブラリや製品の名前
+- 英語で書くと決めているもの（英語のリソース、文字化けを避けるために英語にしている出力など）
+- ツールが付ける定型の行（`Co-Authored-By:` などのトレーラー）
+
+文体は、そのリポジトリの既存の文章に合わせます。
+<!-- github-templates:agent-rules:end -->

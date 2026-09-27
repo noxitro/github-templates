@@ -1,0 +1,106 @@
+# agent-rules/rules.md (AI エージェント向けのルール) を、指定したリポジトリへ PR で配る。
+#
+# 使い方: Actions → 「エージェントのルールを配る」→ Run workflow
+#   repo … 対象のリポジトリ名 (例: nox-apk-manager)。all で全リポジトリ
+#
+# 対象リポジトリの AGENTS.md・.github/copilot-instructions.md・CLAUDE.md を
+# scripts/apply_agent_rules.py で更新し、変更があればブランチ agent-rules に push して PR を作る。
+# ブランチは毎回既定ブランチから作り直すので、何度流しても同じ結果になる (開いている PR は更新される)。
+#
+# ほかのリポジトリへ push して PR を作るので、RULESET_TOKEN に
+# Contents と Pull requests の Read and write も付けておく (README 参照)。
+name: エージェントのルールを配る
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "対象のリポジトリ名 (all で全リポジトリ)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配る
+        env:
+          GH_TOKEN: ${{ secrets.RULESET_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ inputs.repo }}
+          BRANCH: agent-rules
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Secret RULESET_TOKEN が未設定。README の手順で登録する"
+            exit 1
+          fi
+
+          gh auth setup-git
+          # コミットはトークンの持ち主 (自分) の名前で作る
+          me=$(gh api user --jq '.login + " " + (.id | tostring)')
+          login=${me% *}; id=${me#* }
+          git config --global user.name "$login"
+          git config --global user.email "$id+$login@users.noreply.github.com"
+
+          if [ "$REPO" = "all" ]; then
+            targets=$(gh repo list "$OWNER" --source --no-archived --limit 1000 --json name --jq '.[].name')
+          else
+            targets=$REPO
+          fi
+
+          templates=$PWD
+          failed=()
+          for repo in $targets; do
+            dir=$(mktemp -d)
+            if ! gh repo clone "$OWNER/$repo" "$dir" -- --depth 1 --quiet; then
+              echo "::warning::$repo: clone できない"
+              failed+=("$repo"); continue
+            fi
+            if ! git -C "$dir" rev-parse -q --verify HEAD >/dev/null; then
+              echo "⏭️ $repo: 空のリポジトリなので飛ばす"; continue
+            fi
+
+            changed=$(python3 "$templates/scripts/apply_agent_rules.py" "$dir")
+            if [ -z "$changed" ]; then
+              echo "✅ $repo: 変更なし"; continue
+            fi
+
+            if ! (
+              cd "$dir" &&
+              git switch -q -c "$BRANCH" &&
+              git add -A &&
+              git commit -q -m "AI エージェントのルールを github-templates に合わせる" \
+                -m "github-templates の agent-rules/rules.md から配っている部分を更新した。" &&
+              git push -q -f origin "$BRANCH"
+            ); then
+              echo "::warning::$repo: push できない"
+              failed+=("$repo"); continue
+            fi
+
+            pr=$(gh pr list -R "$OWNER/$repo" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+            if [ -n "$pr" ]; then
+              echo "✅ $repo: PR を更新 $pr"; continue
+            fi
+            body=$(printf '%s\n\n%s\n\n%s\n' \
+              "github-templates の \`agent-rules/rules.md\` にある AI エージェント向けのルールを入れます。" \
+              "変更したファイル:" \
+              "$(sed 's/^/- `/; s/$/`/' <<<"$changed")")
+            if pr=$(gh pr create -R "$OWNER/$repo" --head "$BRANCH" \
+                --title "AI エージェントのルールを github-templates に合わせる" --body "$body"); then
+              echo "✅ $repo: PR を作成 $pr"
+            else
+              echo "::warning::$repo: PR を作れない"
+              failed+=("$repo")
+            fi
+          done
+
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::失敗したリポジトリ: ${failed[*]}"
+            exit 1
+          fi
