@@ -3,7 +3,7 @@
 # 使い方: Actions → 「ルールセットを適用」→ Run workflow
 #   repo           … 対象のリポジトリ名 (例: nox-apk-manager)。all で全リポジトリ
 #   ruleset        … 取り込むテンプレート
-#   required_check … CI の必須チェック名 (例: 単体テストとビルド)。空なら付けない
+#   required_check … CI の必須チェック名。カンマ区切りで複数可 (例: 単体テストとビルド, Lint)。空なら付けない
 #
 # 同じ名前のルールセットが既にあれば上書きするので、何度流しても同じ結果になる。
 #
@@ -25,7 +25,7 @@ on:
           - rulesets/protect-default-branch.json
         default: rulesets/protect-default-branch.json
       required_check:
-        description: "CI の必須チェック名 (空なら付けない)"
+        description: "CI の必須チェック名。カンマ区切りで複数可 (空なら付けない)"
         required: false
         default: ""
 
@@ -59,13 +59,15 @@ jobs:
             exit 1
           fi
 
+          # required_check はカンマ区切りで複数指定できる (例: "Privacy scan (tree), Build + unit tests")
           body=$(jq --arg check "$REQUIRED_CHECK" '
-            if $check == "" then . else
+            ($check | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))) as $checks
+            | if ($checks | length) == 0 then . else
               .rules += [{
                 type: "required_status_checks",
                 parameters: {
                   strict_required_status_checks_policy: false,
-                  required_status_checks: [{ context: $check }]
+                  required_status_checks: ($checks | map({ context: . }))
                 }
               }]
             end' "$RULESET")
