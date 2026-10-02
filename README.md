@@ -11,6 +11,9 @@
 |---|---|
 | `rulesets/protect-default-branch.json` | 既定ブランチ (`main` など) を守るルールセット |
 | `.github/workflows/apply-ruleset.yml` | 上のテンプレートを指定リポジトリへ取り込む Actions |
+| `git-hooks/` | 公開してはいけないものを commit / push の前に止める git フック (全リポジトリ共通) |
+| `.github/workflows/secret-scan.yml` | 同じ検査を CI で行う共通ワークフロー (各リポジトリから呼ぶ) |
+| `templates/` | 各リポジトリに置く薄い設定 (共通ワークフローの呼び出しと、クラウドのセッションでフックを入れる設定) |
 
 ## ブラウザだけで取り込む (Actions)
 
@@ -65,3 +68,74 @@ CI のジョブ名はリポジトリごとに違うので、テンプレート�
 
 一度も CI が走っていないとジョブ名が候補に出ない。先に PR か push で CI を 1 回走らせておく。
 存在しないジョブ名を指定すると、チェックが永遠に来ずマージできなくなるので注意。
+
+## git-hooks (秘密情報・個人情報の検査)
+
+`git-hooks/` のフックを global の `core.hooksPath` で全リポジトリに当てる。
+フックの本体はここにしか無いので、直せば全リポジトリに効く。
+
+| 段階 | 検査 |
+|---|---|
+| pre-commit | user.email が noreply か / ステージした内容 (`scan.sh` と gitleaks) |
+| commit-msg | コミットメッセージに外部資料の名前が無いか |
+| pre-push | push する範囲のファイル・コミットメッセージ・作成者とコミッターのメールアドレス・gitleaks |
+
+`scan.sh` が見るもの: 秘密情報 (鍵・トークン・接続文字列・Discord の Webhook URL)、
+個人情報 (ローカル絶対パス・個人メール・このマシンのユーザー名とホスト名)、
+ビルド生成物の混入、MIT と両立しないライセンス・他者の著作権表示、非公開 SDK の識別子、
+外部資料の名前 (`external-names.sha256` にハッシュで置く) と手元の非公開リスト
+(`~/.config/nox/private-names.sha256`、リポジトリには置かない)。
+
+### 対象のリポジトリ
+
+既定では `origin` (pre-push では push 先) が `noxitro/` のリポジトリだけを検査する
+(他者のリポジトリを clone してコミットしたときに、GPL や他者の著作権表示で止めないため)。
+リポジトリごとに変えられる:
+
+```sh
+git config nox.hooks true    # remote が無いリポジトリなどでも検査する
+git config nox.hooks false   # このリポジトリでは検査しない
+```
+
+リポジトリごとの `core.hooksPath` (husky などのフック管理) は global より優先されるので、
+それを使っているリポジトリでは共通のフックは走らない。
+
+### 手元で有効にする (マシンごとに 1 回)
+
+```sh
+git clone https://github.com/noxitro/github-templates ~/.config/nox/github-templates
+sh ~/.config/nox/github-templates/git-hooks/install.sh
+```
+
+更新は `git -C ~/.config/nox/github-templates pull` だけでよい。
+gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無ければ警告を出して組み込みパターンだけで検査する)。
+
+旧方式 (リポジトリの `tools/git-hooks` を `core.hooksPath` に設定) のリポジトリでは、
+その中で `install.sh` を実行すると古い設定を外す。外さないと global より優先され、
+`tools/git-hooks` を消したあとはフックが黙って走らなくなる。
+
+### 各リポジトリに置くもの (`templates/`)
+
+| パス | 役目 |
+|---|---|
+| `.github/workflows/secret-scan.yml` | 共通の Secret scan を呼ぶ。必須チェックにするときのジョブ名は `scan / Scan` |
+| `.claude/settings.json`、`.claude/hooks/session-start.sh` | Claude Code on the web のセッション開始時に、このリポジトリを clone してフックと gitleaks を入れる |
+
+リポジトリ固有の除外は、各リポジトリのルートに置く。
+
+- `.githooks-allow`: `scan.sh` の検査から外すパス (1 行 1 パス、完全一致)。理由をコメントで残す。
+- `.gitleaks.toml`: gitleaks の設定。無ければ `git-hooks/gitleaks.toml` を使う。置くときは共通側を写して allowlist を足す。
+
+### 外部資料の名前を足す
+
+```sh
+python3 ~/.config/nox/github-templates/git-hooks/check-external-names.py --hash '<名前>'
+```
+
+出力を `git-hooks/external-names.sha256` に追記する (全リポジトリに効く)。
+公開リポジトリにハッシュでも置きたくない名前は `--add-private` で手元の非公開リストへ入れる。
+
+### gitleaks の版を上げる
+
+`git-hooks/install-gitleaks.sh` の `GITLEAKS_VERSION` と `GITLEAKS_SHA256_*` だけを直す
+(SHA256 はリリースの checksums.txt から写す)。CI とクラウドのセッションは両方ここから入れる。

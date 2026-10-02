@@ -1,0 +1,8 @@
+# 外部資料の名前 (発表・書籍・他社の製品や設計)。check-external-names.py が使う。
+#
+# 名前を平文で書かないためにハッシュで置いている。足すときは
+#   python3 tools/git-hooks/check-external-names.py --hash '<名前>'
+# の出力を 1 行で追記する。コメントにも名前は書かないこと (ここも公開される)。
+3ba1fdd6d4d7a208860f7d8cfc5e14e8216d149f0b18070f3fd3f85d02141dec  # 設計を参照した発表の題材
+fa9c09cd11432565a679555cf5dca7641b6ee54a88ae2c0172eac75256cd2542  # 発表資料のアーカイブ
+f16072773a6934d13bfafc472ddc9c889a43f35039753a203594f5197cb2e258  # 発表の開催元

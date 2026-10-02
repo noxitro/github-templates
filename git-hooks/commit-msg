@@ -1,0 +1,13 @@
+#!/bin/sh
+# コミットメッセージに外部資料の名前が入っていないか見る。
+# メッセージは後から直すと履歴の書き換えになるので、書いた時点で止める。
+set -u
+DIR=$(dirname "$0")
+. "$DIR/enabled.sh"
+nox_hooks_enabled || exit 0
+PY=$(sh "$DIR/find-python.sh")
+if [ -z "$PY" ]; then
+  echo "commit-msg: Python が見つからないので外部資料名の検査を飛ばした" >&2
+  exit 0
+fi
+"$PY" "$DIR/check-external-names.py" --message "$1"

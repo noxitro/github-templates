@@ -1,0 +1,35 @@
+# このリポジトリ自身の検査。git-hooks/ と共通の Secret scan を、変更した版のまま動かして確かめる。
+name: Self check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 共通ワークフローを、検査器もこの push / PR の版にして呼ぶ。
+  secret-scan:
+    uses: ./.github/workflows/secret-scan.yml
+    with:
+      hooks-ref: ${{ github.sha }}
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/*.sh templates/.claude/hooks/*.sh; do
+            sh -n "$f" && echo "ok: $f"
+          done
+          python3 -m py_compile git-hooks/check-external-names.py
+      - name: ShellCheck
+        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/*.sh templates/.claude/hooks/*.sh

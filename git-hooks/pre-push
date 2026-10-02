@@ -1,0 +1,70 @@
+#!/bin/sh
+# push しようとしている範囲を丸ごと見る。--no-verify でコミット時の
+# チェックを飛ばしていても、外に出る直前にここで捕まえる。
+set -u
+DIR=$(dirname "$0")
+. "$DIR/enabled.sh"
+nox_hooks_enabled "${2:-}" || exit 0
+ZERO=0000000000000000000000000000000000000000
+status=0
+PY=$(sh "$DIR/find-python.sh")
+[ -n "$PY" ] || echo "pre-push: Python が見つからないので外部資料名の検査を飛ばす" >&2
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue          # ブランチ削除
+
+  if [ "$remote_sha" = "$ZERO" ]; then
+    # 新規ブランチ。既に push 済みのものを除いた範囲だけ見る。
+    range=$(git rev-list "$local_sha" --not --remotes | tail -1)
+    [ -n "$range" ] && range="$range^..$local_sha" || range="$local_sha"
+    files=$(git diff --name-only "$range" 2>/dev/null || git ls-tree -r --name-only "$local_sha")
+  else
+    files=$(git diff --name-only "$remote_sha..$local_sha")
+  fi
+
+  # コミットメッセージに外部資料の名前が無いか。--no-verify で commit-msg を
+  # 飛ばしていても、公開される前にここで止める。
+  if [ -n "$PY" ]; then
+    if [ "$remote_sha" = "$ZERO" ]; then
+      "$PY" "$DIR/check-external-names.py" --commits "$local_sha" --not --remotes || status=1
+    else
+      "$PY" "$DIR/check-external-names.py" --commits "$remote_sha..$local_sha" || status=1
+    fi
+  fi
+
+  # 作成者・コミッターのメールアドレスはコミットに残って公開される。許すものを列挙し
+  # (GitHub の個人用 noreply と、GitHub・Claude がマージやクラウドのセッションで使う noreply)、
+  # それ以外なら止める。部分一致だと noreply.taro@example.jp のようなものまで通る。
+  # 範囲が取れない (前回 push したコミットが手元に無い) ときは飛ばす。ci-try は範囲全体を見る。
+  if [ "$remote_sha" = "$ZERO" ]; then
+    emails=$(git log --format='%ae%n%ce' "$local_sha" --not --remotes 2>/dev/null)
+  else
+    emails=$(git log --format='%ae%n%ce' "$remote_sha..$local_sha" 2>/dev/null)
+  fi
+  bad=$(printf '%s\n' "$emails" | grep -v -i -E '@users\.noreply\.github\.com$|^noreply@(github|anthropic)\.com$|^$' | sort -u)
+  if [ -n "$bad" ]; then
+    echo "pre-push: 公開用 (noreply) でないメールアドレスのコミットがある:" >&2
+    printf '  %s\n' $bad >&2
+    echo "  git config user.email <ID>+<ユーザー名>@users.noreply.github.com にしてから作り直すこと" >&2
+    status=1
+  fi
+
+  [ -n "$files" ] || continue
+  echo "pre-push: $(printf '%s\n' "$files" | wc -l) ファイルを検査中…" >&2
+  printf '%s\n' "$files" |
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      git cat-file -e "$local_sha:$p" 2>/dev/null && printf '%s\t%s:%s\n' "$p" "$local_sha" "$p"
+    done |
+    sh "$DIR/scan.sh" || status=1
+
+  # 同じ範囲を gitleaks にも見せる。新規ブランチのときは範囲が取れない
+  # ことがあるので、その場合は push する先端までの全履歴を対象にする。
+  if [ "$remote_sha" = "$ZERO" ]; then
+    sh "$DIR/gitleaks.sh" --log-opts="$local_sha" || status=1
+  else
+    sh "$DIR/gitleaks.sh" --log-opts="$remote_sha..$local_sha" || status=1
+  fi
+done
+
+exit $status
