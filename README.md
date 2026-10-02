@@ -13,6 +13,7 @@
 | `.github/workflows/apply-ruleset.yml` | 上のテンプレートを指定リポジトリへ取り込む Actions |
 | `git-hooks/` | 公開してはいけないものを commit / push の前に止める git フック (全リポジトリ共通) |
 | `.github/workflows/secret-scan.yml` | 同じ検査を CI で行う共通ワークフロー (各リポジトリから呼ぶ) |
+| `.github/workflows/claude-agent.yml` | PR / Issue のコメント (`/claude ...`) で Claude にレビューや質問をさせる共通ワークフロー |
 | `templates/` | 各リポジトリに置く薄い設定 (共通ワークフローの呼び出しと、クラウドのセッションでフックを入れる設定) |
 
 ## ブラウザだけで取り込む (Actions)
@@ -139,3 +140,34 @@ python3 ~/.config/nox/github-templates/git-hooks/check-external-names.py --hash 
 
 `git-hooks/install-gitleaks.sh` の `GITLEAKS_VERSION` と `GITLEAKS_SHA256_*` だけを直す
 (SHA256 はリリースの checksums.txt から写す)。CI とクラウドのセッションは両方ここから入れる。
+
+## Claude (コメントでレビューを頼む)
+
+PR / Issue のコメントの先頭に `/claude` と書き、空白か改行を挟んで頼むと、Claude が差分をレビューしたり質問に答えたりする
+(例: `/claude レビューして`)。本体は `.github/workflows/claude-agent.yml` で、各リポジトリには呼び出し側だけを置く。
+
+### リポジトリに入れる
+
+1. `templates/.github/workflows/claude.yml` を同じパスに置く。
+   - issue_comment で起動するワークフローは既定ブランチの版が使われるので、既定ブランチに入ってから効く。
+2. リポジトリの **Settings → Secrets and variables → Actions** に Secret を登録する。
+   - `CLAUDE_CODE_OAUTH_TOKEN` (必須): 手元で `claude setup-token` を実行して得たもの。
+     Claude のサブスクリプションの利用枠を使う。
+   - `AGENT_APP_ID` / `AGENT_APP_PRIVATE_KEY` (任意): 自前の GitHub App の App ID と秘密鍵。
+     両方あるとその App のトークンで動き、コメントや push がその App の名義になる。無ければ Claude GitHub App で動く。
+     App には Contents / Pull requests / Issues の Read and write を与え、対象のリポジトリにインストールしておく。
+3. Claude GitHub App (自前の App を使わない場合) が対象のリポジトリにインストールされていることを確かめる。
+
+反応するのはオーナー・メンバー・共同編集者のコメントだけ (公開リポジトリで他人に利用枠を使われないため)。
+
+### 合図を変える
+
+呼び出し側で `trigger-phrase` を渡す。自前の App の名前にすると `@<App の名前> レビューして` で動く
+(GitHub のメンション通知が飛ぶわけではなく、コメントの先頭の文字列で判定している)。
+
+```yaml
+    uses: noxitro/github-templates/.github/workflows/claude-agent.yml@main
+    with:
+      trigger-phrase: "@<App の名前>"
+    secrets: inherit
+```
