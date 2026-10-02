@@ -3,7 +3,8 @@
 set -u
 DIR=$(dirname "$0")
 . "$DIR/enabled.sh"
-nox_hooks_enabled || exit 0
+. "$DIR/chain.sh"
+nox_hooks_enabled || { nox_run_local_hook pre-commit "$@"; exit $?; }
 
 # コミットする identity が noreply になっているか。履歴を浄化した意味を
 # 保つために、ここで個人メールでのコミットを止める。
@@ -30,3 +31,5 @@ git diff --cached --name-only --diff-filter=ACM -z | tr '\0' '\n' |
 
 # 組み込みパターンで拾えないものを gitleaks に見てもらう。
 sh "$DIR/gitleaks.sh" --staged || exit 1
+
+nox_run_local_hook pre-commit "$@"

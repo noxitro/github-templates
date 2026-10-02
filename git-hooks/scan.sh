@@ -32,7 +32,8 @@ LICENSE_RE='GNU (Lesser |Library |Affero )?General Public License|SPDX-License-I
 # 他者の著作権表示。自分の表示 (Copyright (c) 2023-XXXX noxitro など) 以外は、コードの引き写しを疑う。
 # (c) の無い、年が直後に続く形 (Copyright <年> <名前>) も拾う。
 COPYRIGHT_RE='copyright[[:space:]]*(\(c\)|©|[0-9]{4})'
-OWN_COPYRIGHT_RE='noxitro|[0-9][[:space:]]+nitro([^A-Za-z0-9]|$)'
+# nitro は github-templates の LICENSE の表記。他者の "2019 Nitro Software" などを通さないよう、行末まで一致させる。
+OWN_COPYRIGHT_RE='noxitro|\(c\)[[:space:]]+[0-9]{4}(-[0-9]{4})?[[:space:]]+nitro[[:space:]]*$'
 # 家庭用ゲーム機の非公開 SDK (NDA 下で配布されるもの) の識別子。ヘッダ・名前空間・関数と
 # マクロの命名規則で見る。製品名ではなく、コードに現れる形だけを並べている。
 # nn:: は直前が :: のもの (torch::nn::functional:: などのニューラルネット系) を外す。

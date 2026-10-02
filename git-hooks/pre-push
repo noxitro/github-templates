@@ -4,7 +4,15 @@
 set -u
 DIR=$(dirname "$0")
 . "$DIR/enabled.sh"
-nox_hooks_enabled "${2:-}" || exit 0
+. "$DIR/chain.sh"
+# 標準入力 (push する ref の一覧) は検査とリポジトリ固有のフックの両方に渡すので、先に保存する。
+REFS=$(mktemp) || exit 1
+trap 'rm -f "$REFS"' EXIT INT TERM
+cat > "$REFS"
+if ! nox_hooks_enabled "${2:-}"; then
+  nox_run_local_hook pre-push "$@" < "$REFS"
+  exit $?
+fi
 ZERO=0000000000000000000000000000000000000000
 status=0
 PY=$(sh "$DIR/find-python.sh")
@@ -65,6 +73,7 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   else
     sh "$DIR/gitleaks.sh" --log-opts="$remote_sha..$local_sha" || status=1
   fi
-done
+done < "$REFS"
 
-exit $status
+[ "$status" -eq 0 ] || exit "$status"
+nox_run_local_hook pre-push "$@" < "$REFS"

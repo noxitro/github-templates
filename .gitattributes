@@ -1,0 +1,3 @@
+# シェルスクリプトは Windows (Git for Windows の sh) でも動かすので、改行を LF に固定する。
+# 既定の core.autocrlf=true で clone すると CRLF に変換され、"set -u\r" などで全フックが落ちるため。
+* text=auto eol=lf

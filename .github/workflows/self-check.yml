@@ -27,9 +27,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/*.sh templates/.claude/hooks/*.sh; do
+          for f in git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh; do
             sh -n "$f" && echo "ok: $f"
           done
           python3 -m py_compile git-hooks/check-external-names.py
+      # Windows の sh は CRLF のスクリプトを読めない。.gitattributes で LF に固定しているが、
+      # 既に CRLF で入ってしまったものはそれでは直らないので、ここで止める。
+      - name: Line endings
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=$(git ls-files --eol | awk '$1 != "i/lf" && $1 != "i/none" && $1 != "i/-text"' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::LF でないファイルがある"
+            echo "$bad"
+            exit 1
+          fi
       - name: ShellCheck
-        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/*.sh templates/.claude/hooks/*.sh
+        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh

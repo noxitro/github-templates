@@ -1,0 +1,6 @@
+#!/bin/sh
+# 共通の検査は無い。global の core.hooksPath で見られなくなる .git/hooks/post-checkout
+# (Git LFS が入れるものなど) へそのまま回す。
+DIR=$(dirname "$0")
+. "$DIR/chain.sh"
+nox_run_local_hook post-checkout "$@"
