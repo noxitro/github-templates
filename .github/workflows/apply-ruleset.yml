@@ -1,7 +1,7 @@
 # rulesets/ のテンプレートを、指定したリポジトリへ取り込む。
 #
 # 使い方: Actions → 「ルールセットを適用」→ Run workflow
-#   repo           … 対象のリポジトリ名 (例: nox-apk-manager)。all で全リポジトリ
+#   repo           … 対象のリポジトリ名 (例: nox-apk-manager)。all で全公開リポジトリ
 #   ruleset        … 取り込むテンプレート
 #   required_check … CI の必須チェック名。カンマ区切りで複数可 (例: 単体テストとビルド, Lint)。空なら付けない
 #
@@ -9,14 +9,16 @@
 #
 # GITHUB_TOKEN ではほかのリポジトリの設定を変えられないので、
 # Administration: Read and write を持つ fine-grained トークンを
-# Secret の RULESET_TOKEN に入れておく (README 参照)。
+# Environment「rulesets」の Secret の RULESET_TOKEN に入れておく (README 参照)。
+# リポジトリの Secret に置くと、作業ブランチに置いた workflow からも使えてしまうので、
+# Environment を main からしか使えないようにしておく。
 name: ルールセットを適用
 
 on:
   workflow_dispatch:
     inputs:
       repo:
-        description: "対象のリポジトリ名 (all で全リポジトリ)"
+        description: "対象のリポジトリ名 (all で全公開リポジトリ)"
         required: true
       ruleset:
         description: "テンプレート"
@@ -35,6 +37,8 @@ permissions:
 jobs:
   apply:
     runs-on: ubuntu-latest
+    # RULESET_TOKEN は main からしか使えない Environment に置く (README 参照)
+    environment: rulesets
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +53,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Secret RULESET_TOKEN が未設定。README の手順で登録する"
+            echo "::error::Environment rulesets の Secret RULESET_TOKEN が未設定。README の手順で登録する"
             exit 1
           fi
 
@@ -74,7 +78,9 @@ jobs:
           name=$(jq -r '.name' <<<"$body")
 
           if [ "$REPO" = "all" ]; then
-            targets=$(gh repo list "$OWNER" --source --no-archived --limit 1000 --json name --jq '.[].name')
+            # 非公開リポジトリは GitHub Free だとルールセットを使えず 403 になるので、公開リポジトリだけにする。
+            # Pro などに上げたら --visibility public を外す。
+            targets=$(gh repo list "$OWNER" --source --no-archived --visibility public --limit 1000 --json name --jq '.[].name')
           else
             targets=$REPO
           fi
