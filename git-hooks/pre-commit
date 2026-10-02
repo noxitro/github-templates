@@ -1,0 +1,32 @@
+#!/bin/sh
+# ステージされた内容だけを見る。速いのでコミットのたびに走らせてよい。
+set -u
+DIR=$(dirname "$0")
+. "$DIR/enabled.sh"
+nox_hooks_enabled || exit 0
+
+# コミットする identity が noreply になっているか。履歴を浄化した意味を
+# 保つために、ここで個人メールでのコミットを止める。
+# noreply@anthropic.com は Claude Code on the web のセッションが使う identity
+# (各リポジトリの .claude/hooks/session-start.sh がクラウドでもこのフックを有効にする)。
+email=$(git config user.email 2>/dev/null || true)
+case "$email" in
+  *@users.noreply.github.com|*@github.com|noreply@anthropic.com) ;;
+  "")
+    echo "pre-commit: user.email が未設定。git config user.email を設定すること" >&2
+    exit 1 ;;
+  *)
+    echo "pre-commit: user.email が '$email' になっている。" >&2
+    echo "  公開リポジトリなので noreply アドレスを使うこと:" >&2
+    echo "    git config user.email '38311969+noxitro@users.noreply.github.com'" >&2
+    exit 1 ;;
+esac
+
+# -z はパスの引用符付け (日本語などの 8 進エスケープ) を避けるため。read -d は bash 専用で、
+# Linux の sh (dash) では失敗して何も検査されずに通っていたので、tr で改行区切りに直して読む。
+git diff --cached --name-only --diff-filter=ACM -z | tr '\0' '\n' |
+  while IFS= read -r p; do printf '%s\t:%s\n' "$p" "$p"; done |
+  sh "$DIR/scan.sh" || exit 1
+
+# 組み込みパターンで拾えないものを gitleaks に見てもらう。
+sh "$DIR/gitleaks.sh" --staged || exit 1
