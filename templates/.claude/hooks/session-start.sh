@@ -21,15 +21,27 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# フックは同期で走るので、GitHub の応答が止まったときにセッションの開始を待たせ続けない。
+limited() {
+  if command -v timeout >/dev/null 2>&1; then timeout 60 "$@"; else "$@"; fi
+}
+
 dir="$HOME/.config/nox/github-templates"
 if [ -d "$dir/.git" ]; then
-  git -C "$dir" pull -q --ff-only || echo "session-start: github-templates の更新に失敗した。手元の版で続ける" >&2
+  limited git -C "$dir" pull -q --ff-only || echo "session-start: github-templates の更新に失敗した。手元の版で続ける" >&2
 else
+  # 途中で打ち切られた clone を残すと、次回以降は「取得済み」と見なされて壊れたまま使われるので、
+  # 一時ディレクトリに取ってから置き換える。
   mkdir -p "$(dirname "$dir")"
-  git clone -q --depth 1 https://github.com/noxitro/github-templates "$dir" || {
+  tmp="$dir.tmp.$$"
+  rm -rf "$tmp"
+  if limited git clone -q --depth 1 https://github.com/noxitro/github-templates "$tmp" && mv "$tmp" "$dir"; then
+    :
+  else
+    rm -rf "$tmp"
     echo "session-start: github-templates の取得に失敗した。フックは無効のまま" >&2
     exit 0
-  }
+  fi
 fi
 
 # install.sh は実行した場所のリポジトリに残った旧方式の core.hooksPath も外すので、リポジトリの中で呼ぶ。
