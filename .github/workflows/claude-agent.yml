@@ -7,7 +7,7 @@
 #         「/claudeレビューして」のように続けて書くと反応しない。
 # 自動では走らせない: PR ごとに走らせると重複が多く、利用枠も減るため。
 #
-# 認証 (Secret は呼び出し側のリポジトリに置き、secrets: inherit で渡す):
+# 認証 (Secret は呼び出し側のリポジトリに置き、下の 3 つだけを明示して渡す):
 #   CLAUDE_CODE_OAUTH_TOKEN … 必須。手元の Claude Code CLI で `claude setup-token`。
 #       Claude のサブスクリプションの利用枠を使う (API の従量課金はかからない)。
 #   AGENT_APP_ID / AGENT_APP_PRIVATE_KEY … 任意。自前の GitHub App のもの。
