@@ -7,7 +7,7 @@
 #         「/claudeレビューして」のように続けて書くと反応しない。
 # 自動では走らせない: PR ごとに走らせると重複が多く、利用枠も減るため。
 #
-# 認証 (Secret は呼び出し側のリポジトリに置き、secrets: inherit で渡す):
+# 認証 (Secret は呼び出し側のリポジトリに置き、下の 3 つだけを明示して渡す):
 #   CLAUDE_CODE_OAUTH_TOKEN … 必須。手元の Claude Code CLI で `claude setup-token`。
 #       Claude のサブスクリプションの利用枠を使う (API の従量課金はかからない)。
 #   AGENT_APP_ID / AGENT_APP_PRIVATE_KEY … 任意。自前の GitHub App のもの。
@@ -32,8 +32,11 @@ on:
         type: number
         default: 30
     secrets:
+      # required: true にすると、job の if (合図の判定) より前に呼び出しの時点で検査され、
+      # Secret の無いリポジトリでは合図でない普通のコメントでも失敗の実行が残る。
+      # 任意にして、合図で起動したときだけ下の step で止める。
       CLAUDE_CODE_OAUTH_TOKEN:
-        required: true
+        required: false
       AGENT_APP_ID:
         required: false
       AGENT_APP_PRIVATE_KEY:
@@ -57,8 +60,15 @@ jobs:
     env:
       # secrets は step の if で直接使えないので、有無だけをここで真偽値にしておく。
       HAS_AGENT_APP: ${{ secrets.AGENT_APP_ID != '' && secrets.AGENT_APP_PRIVATE_KEY != '' }}
+      HAS_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
 
     steps:
+      - name: Check secrets
+        if: env.HAS_OAUTH_TOKEN != 'true'
+        run: |
+          echo "::error::Secret CLAUDE_CODE_OAUTH_TOKEN がこのリポジトリに無い。Settings → Secrets and variables → Actions に登録する (github-templates の README)"
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1

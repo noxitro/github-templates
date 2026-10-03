@@ -199,5 +199,8 @@ PR / Issue のコメントの先頭に `/claude` と書き、空白か改行を�
     uses: noxitro/github-templates/.github/workflows/claude-agent.yml@main
     with:
       trigger-phrase: "@<App の名前>"
-    secrets: inherit
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
+      AGENT_APP_PRIVATE_KEY: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
 ```

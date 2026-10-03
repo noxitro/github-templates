@@ -23,4 +23,9 @@ jobs:
       id-token: write        # Claude GitHub App の認証に使う
       actions: read          # CI の結果を読んで答えられるように
     uses: noxitro/github-templates/.github/workflows/claude-agent.yml@main
-    secrets: inherit
+    # 共通側で使う Secret だけを渡す (secrets: inherit だとリポジトリの Secret がすべて渡る)。
+    # 無いものは空のまま渡り、共通側で扱う。
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
+      AGENT_APP_PRIVATE_KEY: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
