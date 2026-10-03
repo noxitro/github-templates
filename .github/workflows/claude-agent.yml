@@ -1,0 +1,86 @@
+# Claude の共通ワークフロー。PR / Issue のコメントが合図 (既定 /claude) で始まるときだけ動き、
+# 差分をレビューしたり質問に答えたりする。各リポジトリから workflow_call で呼ぶ。
+# 呼び出し側の雛形は templates/.github/workflows/claude.yml。
+#
+# 使い方: コメントの先頭に合図を書き、空白か改行を挟んで頼む。
+#         例:「/claude review」「/claude この変更で性能は落ちない?」
+#         「/claudeレビューして」のように続けて書くと反応しない。
+# 自動では走らせない: PR ごとに走らせると重複が多く、利用枠も減るため。
+#
+# 認証 (Secret は呼び出し側のリポジトリに置き、secrets: inherit で渡す):
+#   CLAUDE_CODE_OAUTH_TOKEN … 必須。手元の Claude Code CLI で `claude setup-token`。
+#       Claude のサブスクリプションの利用枠を使う (API の従量課金はかからない)。
+#   AGENT_APP_ID / AGENT_APP_PRIVATE_KEY … 任意。自前の GitHub App のもの。
+#       両方あれば、その App のトークンで動く (コメントや push がその App の名義になり、
+#       App のトークンでの push は CI も起動する)。無ければ Claude GitHub App で動く。
+#
+# 権限: 公開リポジトリでは誰でもコメントできる。他人の合図で利用枠を使われないよう、
+#       オーナー・メンバー・共同編集者のコメントだけに反応する。
+#       呼び出し側の job で permissions を与える (共通側からは広げられない)。
+
+name: Claude (共通)
+
+on:
+  workflow_call:
+    inputs:
+      trigger-phrase:
+        description: "反応する合図。コメントがこれで始まるときだけ動く (例: /claude、@<App の名前>)"
+        type: string
+        default: /claude
+      timeout-minutes:
+        description: "暴走して利用枠を使い切らないための上限"
+        type: number
+        default: 30
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+      AGENT_APP_ID:
+        required: false
+      AGENT_APP_PRIVATE_KEY:
+        required: false
+
+jobs:
+  claude:
+    # 先頭が合図のコメントだけで走らせる。contains にすると
+    # 「https://claude.ai/...」のような URL にも当たり、ランナーが無駄に立ち上がる。
+    if: >-
+      (
+        (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, inputs.trigger-phrase) &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+        (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, inputs.trigger-phrase) &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+        (github.event_name == 'pull_request_review' && startsWith(github.event.review.body, inputs.trigger-phrase) &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      # secrets は step の if で直接使えないので、有無だけをここで真偽値にしておく。
+      HAS_AGENT_APP: ${{ secrets.AGENT_APP_ID != '' && secrets.AGENT_APP_PRIVATE_KEY != '' }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # 自前の App があれば、このリポジトリだけに絞ったトークンを発行する。
+      - name: GitHub App token
+        id: app
+        if: env.HAS_AGENT_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 空なら Claude GitHub App のトークンで動く
+          github_token: ${{ steps.app.outputs.token }}
+          trigger_phrase: ${{ inputs.trigger-phrase }}
+          # job の actions: read だけでは Claude 側のトークンに渡らないので、
+          # ここでも渡して CI の結果を読めるようにする
+          additional_permissions: |
+            actions: read
