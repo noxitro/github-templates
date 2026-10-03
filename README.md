@@ -25,15 +25,25 @@ GitHub Actions の標準トークンではほかのリポジトリの設定を�
    - Repository access: **All repositories**
    - Permissions → Repository permissions → **Administration: Read and write**
    - 有効期限は好みで。切れたら作り直して Secret を差し替える
-2. このリポジトリの **Settings → Secrets and variables → Actions → New repository secret**
+2. このリポジトリの **Settings → Environments → New environment**
+   - Name: `rulesets`
+   - **Deployment branches and tags** を **Selected branches and tags** にし、ブランチ `main` だけを許可する
+3. 2 で作った Environment の **Environment secrets → Add environment secret**
    - Name: `RULESET_TOKEN`
    - Secret: 1 で作ったトークン
+4. このリポジトリ自身にも `protect-default-branch` を取り込む (下の「取り込むたびに」で `repo` を `github-templates` にする)
+
+トークンはリポジトリの Secret (Secrets and variables → Actions) には置かない。
+リポジトリに書き込める者は、そのリポジトリの Secret を workflow から使える。
+作業ブランチに workflow を置くだけで、全リポジトリのルールセットを書き換えられるこのトークンに届いてしまう。
+`main` からしか使えない Environment に置き、`main` を 4 で PR 必須にしておけば、PR を通さずには届かない。
+以前リポジトリの Secret として登録していた場合は、Environment に登録し直してから消す。
 
 ### 取り込むたびに
 
-1. このリポジトリの **Actions → ルールセットを適用 → Run workflow**
+1. このリポジトリの **Actions → ルールセットを適用 → Run workflow** (ブランチは `main` のまま)
 2. 入力して実行
-   - `repo`: 対象のリポジトリ名 (例: `nox-apk-manager`)。`all` なら全リポジトリ (フォークとアーカイブ済みは除く)
+   - `repo`: 対象のリポジトリ名 (例: `nox-apk-manager`)。`all` なら全公開リポジトリ (フォーク・アーカイブ済み・非公開は除く。非公開は GitHub Free だとルールセットを使えない)
    - `required_check`: CI の必須チェック名。カンマ区切りで複数可 (例: `単体テストとビルド, Lint`)。空なら付けない。`all` のときは空にする
 
 同じ名前のルールセットが既にあれば上書きするので、テンプレートを直したあとに流し直せば全リポジトリへ反映できる。
@@ -47,8 +57,16 @@ GitHub Actions の標準トークンではほかのリポジトリの設定を�
 | 対象 | `~DEFAULT_BRANCH` | `main` でも `master` でもそのまま効く |
 | ブランチ削除 | 禁止 | 誤削除を防ぐ |
 | force-push | 禁止 | 履歴の書き換えを防ぐ |
-| PR 必須 | ON、承認数 0 | 直接 push を防ぐ。承認を 1 以上にすると自分の PR を自分で承認できず詰まる |
-| 回避できる人 | リポジトリ管理者 (`actor_id: 5`) | 緊急時に自分だけは回避できる |
+| PR 必須 | ON、承認数 1 | 直接 push を防ぐ。PR を作った本人は承認できないので、AI は自分で作った PR を自分でマージできない (承認数 0 だとマージできてしまう) |
+| 承認後の push | 承認を取り消す | 承認のあとに AI が push を足して、そのままマージするのを防ぐ |
+| 回避できる人 | リポジトリ管理者 (`actor_id: 5`) | 自分は直接 push でき、承認が無くてもマージできる |
+
+AI エージェントには、自分とは別の身元 (GitHub App など) で push・PR 作成をさせる前提。
+自分のアカウントのまま動く AI (クラウドのセッションなど) は管理者として回避できるので、このルールでは止まらない。
+
+承認の付いていない PR (AI の PR も自分の PR も) をマージするときは、PR 画面で
+**Merge without waiting for requirements to be met (bypass rules)** にチェックを入れる (CLI なら `gh pr merge --admin`)。
+自動マージ (auto-merge) は承認が付くまで待つので、承認しない運用では使えない。
 
 ### 画面から手で取り込む場合
 
