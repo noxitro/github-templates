@@ -32,10 +32,12 @@ if [ -d "$dir/.git" ]; then
 else
   # 途中で打ち切られた clone を残すと、次回以降は「取得済み」と見なされて壊れたまま使われるので、
   # 一時ディレクトリに取ってから置き換える。
+  # $dir が .git の無いディレクトリとして残っていると、mv がその中へ移して成功扱いになるので先に消す。
+  # ここはこのフック専用の置き場で、手で置いたものを残す必要は無い。
   mkdir -p "$(dirname "$dir")"
   tmp="$dir.tmp.$$"
   rm -rf "$tmp"
-  if limited git clone -q --depth 1 https://github.com/noxitro/github-templates "$tmp" && mv "$tmp" "$dir"; then
+  if limited git clone -q --depth 1 https://github.com/noxitro/github-templates "$tmp" && rm -rf "$dir" && mv "$tmp" "$dir"; then
     :
   else
     rm -rf "$tmp"

@@ -4,10 +4,13 @@
 set -u
 DIR=$(dirname "$0")
 . "$DIR/enabled.sh"
-nox_hooks_enabled || exit 0
-PY=$(sh "$DIR/find-python.sh")
-if [ -z "$PY" ]; then
-  echo "commit-msg: Python が見つからないので外部資料名の検査を飛ばした" >&2
-  exit 0
+. "$DIR/chain.sh"
+if nox_hooks_enabled; then
+  PY=$(sh "$DIR/find-python.sh")
+  if [ -z "$PY" ]; then
+    echo "commit-msg: Python が見つからないので外部資料名の検査を飛ばした" >&2
+  else
+    "$PY" "$DIR/check-external-names.py" --message "$1" || exit 1
+  fi
 fi
-"$PY" "$DIR/check-external-names.py" --message "$1"
+nox_run_local_hook commit-msg "$@"

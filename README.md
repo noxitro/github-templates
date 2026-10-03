@@ -118,6 +118,16 @@ git config nox.hooks false   # このリポジトリでは検査しない
 リポジトリごとの `core.hooksPath` (husky などのフック管理) は global より優先されるので、
 それを使っているリポジトリでは共通のフックは走らない。
 
+global の `core.hooksPath` を設定すると、git は `.git/hooks` を見なくなる。そのため共通のフックは、
+検査が通ったあと (対象外のリポジトリでは検査なしで) `.git/hooks/<名前>` があれば続けて呼ぶ
+(pre-commit / commit-msg / pre-push と、Git LFS が使う post-checkout / post-commit / post-merge。`chain.sh`)。
+Git LFS のフックは `git lfs install` だと共通のフックとぶつかって入らないので、
+LFS を使うリポジトリの中で次のように `.git/hooks` へ入れる。
+
+```sh
+git -c core.hooksPath=.git/hooks lfs install --local
+```
+
 ### 手元で有効にする (マシンごとに 1 回)
 
 ```sh

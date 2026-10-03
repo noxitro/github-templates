@@ -7,7 +7,7 @@
 set -eu
 # Windows (Git for Windows の sh) では pwd が /c/... を返し、git 本体が読めないので C:/... の形にする。
 DIR=$(cd "$(dirname "$0")" && { pwd -W 2>/dev/null || pwd; })
-chmod +x "$DIR"/pre-commit "$DIR"/commit-msg "$DIR"/pre-push "$DIR"/*.sh "$DIR"/*.py 2>/dev/null || true
+chmod +x "$DIR"/pre-commit "$DIR"/commit-msg "$DIR"/pre-push "$DIR"/post-* "$DIR"/*.sh "$DIR"/*.py 2>/dev/null || true
 git config --global core.hooksPath "$DIR"
 echo "core.hooksPath (global) = $DIR を設定した。"
 
