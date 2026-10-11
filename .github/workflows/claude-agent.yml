@@ -69,9 +69,17 @@ jobs:
           echo "::error::Secret CLAUDE_CODE_OAUTH_TOKEN がこのリポジトリに無い。Settings → Secrets and variables → Actions に登録する (github-templates の README)"
           exit 1
 
+      # 資格情報を残さない。checkout v6 以降は GITHUB_TOKEN の認証ヘッダーを
+      # includeIf で読む別ファイルに置き、claude-code-action はそれを消せない。
+      # 残ると git がそのヘッダーを優先して送り、push が GITHUB_TOKEN
+      # (contents: read) の github-actions[bot] 名義になって 403 で拒否される。
+      # push の認証は claude-code-action が remote URL に入れるトークンで足りる。
+      # ただし PR ブランチの fetch はその設定より前に認証なしで行うので、
+      # 非公開リポジトリから呼ぶと fetch で失敗する (呼び出し側は公開リポジトリだけ)。
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       # 自前の App があれば、このリポジトリだけに絞ったトークンを発行する。
       - name: GitHub App token
