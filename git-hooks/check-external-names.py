@@ -28,6 +28,11 @@
 候補の総当たりで関係が知られてしまう名前はこちらへ入れる。書式は禁止リストと同じで、
 --add-private で追記できる。無ければ飛ばす (CI には無いので、止めるのは手元のフックだけ)。
 
+もう 1 つ、所属組織の文脈を示す語 (org-context-terms.txt。平文) も見る。名前を伏せても、
+組織内での取り組みだと分かる書き方 (展開の経緯・役割・体制など) から書き手の勤め先は推測できるため。
+語そのものは秘密ではないので平文で置く。英数字だけの語は語の境界で、それ以外は部分文字列で照合する。
+手元にだけ置く追加の語は ~/.config/nox/private-terms.txt (環境変数 NOX_PRIVATE_TERMS で変えられる)。
+
 使い方:
   check-external-names.py --blobs          標準入力の "<path>\\t<blob-ish>" を検査 (scan.sh と同じ形式)
   check-external-names.py --message FILE   コミットメッセージを検査 (commit-msg フック)
@@ -57,6 +62,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 LIST_PATH = HERE / "external-names.sha256"
 PRIVATE_LIST_PATH = pathlib.Path(
     os.environ.get("NOX_PRIVATE_NAMES") or pathlib.Path.home() / ".config" / "nox" / "private-names.sha256")
+TERMS_PATH = HERE / "org-context-terms.txt"
+PRIVATE_TERMS_PATH = pathlib.Path(
+    os.environ.get("NOX_PRIVATE_TERMS") or pathlib.Path.home() / ".config" / "nox" / "private-terms.txt")
 SALT = "nox-external-name:"
 MAX_BYTES = 5 * 1024 * 1024
 MAX_JOIN = 3
@@ -68,6 +76,8 @@ HINT_TERMS = ("講演",)
 # github-templates では git-hooks/、共通化する前の Nox では tools/git-hooks/ にあるので末尾で見る。
 # 禁止リスト (external-names.sha256) は平文の名前を持たないはずなので、外さずに検査する。
 SELF_SUFFIX = "git-hooks/check-external-names.py"
+# 文脈語の一覧そのもの。語を平文で持つので対象から外す。
+SELF_SUFFIXES = (SELF_SUFFIX, "git-hooks/org-context-terms.txt")
 
 TOKEN_RE = re.compile(r"[0-9a-z]+|[ァ-ヺー]+")
 TOKEN_ONLY_RE = re.compile(r"(?:[0-9a-z]|[ァ-ヺー])+")
@@ -172,12 +182,52 @@ def find_in_line(line: str, names: NameList, hints: bool = True) -> str | None:
     return None
 
 
-class Checks:
-    """照合するリストの組。公開の禁止リストと、手元にだけある非公開リスト。"""
+class Terms:
+    """所属組織の文脈を示す語。平文の一覧から読む。"""
 
-    def __init__(self, names: NameList, private: NameList | None) -> None:
+    def __init__(self) -> None:
+        self.substrings: list[str] = []
+        self.words: list[tuple[str, re.Pattern[str]]] = []
+
+    def load(self, path: pathlib.Path) -> None:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            term = normalize(line.split("#", 1)[0].strip())
+            if not term:
+                continue
+            if term.isascii():
+                # 区切り (空白・ハイフン・下線) の揺れと複数形を許し、語の境界で見る。
+                body = r"[\s_-]*".join(re.escape(w) for w in re.split(r"[\s_-]+", term))
+                self.words.append((term, re.compile(rf"(?<![0-9a-z]){body}(?:e?s)?(?![0-9a-z])")))
+            else:
+                self.substrings.append(term)
+
+    def find(self, line: str) -> str | None:
+        norm = normalize(line)
+        for term in self.substrings:
+            if term in norm:
+                return term
+        for term, pattern in self.words:
+            if pattern.search(norm):
+                return term
+        return None
+
+
+def load_terms() -> Terms:
+    terms = Terms()
+    if TERMS_PATH.exists():
+        terms.load(TERMS_PATH)
+    if PRIVATE_TERMS_PATH.exists():
+        terms.load(PRIVATE_TERMS_PATH)
+    return terms
+
+
+class Checks:
+    """照合するリストの組。公開の禁止リストと手元にだけある非公開リスト、所属組織の文脈語。"""
+
+    def __init__(self, names: NameList, private: NameList | None, terms: Terms | None = None) -> None:
         self.names = names
         self.private = private
+        self.terms = terms
 
 
 def scan_text(label: str, text: str, checks: Checks) -> int:
@@ -192,6 +242,12 @@ def scan_text(label: str, text: str, checks: Checks) -> int:
             hit = find_in_line(line, checks.private, hints=False)
             if hit:
                 print(f"  [PRIVATE-NAME] {label}:{no}\n    {hit} — 手元の非公開リストの名前 (所属先など)", file=sys.stderr)
+                found += 1
+                continue
+        if checks.terms is not None:
+            hit = checks.terms.find(line)
+            if hit:
+                print(f"  [WORKPLACE-CONTEXT] {label}:{no}\n    「{hit}」 — 所属組織の文脈を示す語", file=sys.stderr)
                 found += 1
     return found
 
@@ -262,7 +318,7 @@ def cmd_blobs(names: Checks) -> int:
     pairs = []
     for line in sys.stdin.read().splitlines():
         path, sep, obj = line.partition("\t")
-        if sep and path and path != SELF_SUFFIX and not path.endswith("/" + SELF_SUFFIX):
+        if sep and path and not any(path == s or path.endswith("/" + s) for s in SELF_SUFFIXES):
             pairs.append((path, obj))
     found = 0
     for path, body in iter_blobs(pairs):
@@ -344,7 +400,10 @@ def main() -> int:
     if PRIVATE_LIST_PATH.exists():
         private = NameList()
         private.load(PRIVATE_LIST_PATH)
-    names = Checks(names, private)
+    if os.environ.get("NOX_PRIVATE_TERMS") and not PRIVATE_TERMS_PATH.exists():
+        print(f"check-external-names: NOX_PRIVATE_TERMS の指すファイルが無い: {PRIVATE_TERMS_PATH}", file=sys.stderr)
+        return 2
+    names = Checks(names, private, load_terms())
     try:
         if args.blobs:
             found = cmd_blobs(names)
@@ -359,6 +418,8 @@ def main() -> int:
     if found:
         print(
             "\n  外部資料の名前や、手元の非公開リストの名前 (所属先など) は書かないこと。\n"
+            "  所属組織の文脈を示す語 (WORKPLACE-CONTEXT) は、誰の・どこの取り組みかが読み取れない\n"
+            "  一般的な書き方に直す。名前を伏せても、経緯・役割・体制から勤め先は推測できる。\n"
             "  設計の説明は資料名を出さずに自分の言葉で書く。\n"
             "  コミットメッセージなら書き直してから push する (git commit --amend / rebase)。",
             file=sys.stderr)

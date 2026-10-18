@@ -1,0 +1,38 @@
+# 所属組織 (勤め先) の文脈を示す語。check-external-names.py が全リポジトリで照合する。
+#
+# 名前を伏せても、「組織内で」「誰が推進して」「どの部署に配った」といった書き方から、
+# 同じ組織の人には書き手と取り組みが分かってしまう。公開リポジトリにはこうした文脈を書かない。
+#
+# 1 行 1 語。英数字だけの語は語の境界で (区切りの揺れと複数形を許して)、それ以外は部分文字列で照合する。
+# 誤検出しやすい一般語は入れない。リポジトリ固有の除外は .githooks-allow (パス単位) で行う。
+社内
+社外
+職場
+自社
+弊社
+当社
+全社
+社員
+従業員
+勤務先
+勤め先
+所属先
+上司
+同僚
+部署
+推進担当
+稟議
+取引先
+うちの会社
+workplace
+at work
+coworker
+co-worker
+employer
+in-house
+company-wide
+all-employee
+our company
+our tenant
+our org
+our organization
