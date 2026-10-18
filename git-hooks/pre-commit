@@ -6,6 +6,8 @@ DIR=$(dirname "$0")
 . "$DIR/chain.sh"
 nox_hooks_enabled || { nox_run_local_hook pre-commit "$@"; exit $?; }
 
+nox_org_context_allowed && export NOX_ALLOW_ORG_CONTEXT=1
+
 # コミットする identity が noreply になっているか。履歴を浄化した意味を
 # 保つために、ここで個人メールでのコミットを止める。
 # noreply@anthropic.com は Claude Code on the web のセッションが使う identity
