@@ -31,6 +31,7 @@ jobs:
             sh -n "$f" && echo "ok: $f"
           done
           python3 -m py_compile git-hooks/check-external-names.py
+          python3 -m py_compile git-hooks/fix-format.py
       # Windows の sh は CRLF のスクリプトを読めない。.gitattributes で LF に固定しているが、
       # 既に CRLF で入ってしまったものはそれでは直らないので、ここで止める。
       - name: Line endings

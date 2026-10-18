@@ -97,7 +97,7 @@ CI のジョブ名はリポジトリごとに違うので、テンプレート�
 
 | 段階 | 検査 |
 |---|---|
-| pre-commit | user.email が noreply か / ステージした内容 (`scan.sh` と gitleaks) |
+| pre-commit | user.email が noreply か / ステージした内容 (`scan.sh` と gitleaks) / 改行の混在と BOM を直す (`fix-format.py`、止めない) |
 | commit-msg | コミットメッセージに外部資料の名前が無いか |
 | pre-push | push する範囲のファイル・コミットメッセージ・作成者とコミッターのメールアドレス・gitleaks |
 
@@ -106,6 +106,27 @@ CI のジョブ名はリポジトリごとに違うので、テンプレート�
 ビルド生成物の混入、MIT と両立しないライセンス・他者の著作権表示、非公開 SDK の識別子、
 外部資料の名前 (`external-names.sha256` にハッシュで置く) と手元の非公開リスト
 (`~/.config/nox/private-names.sha256`、リポジトリには置かない)。
+
+### 改行コードと BOM の自動修正 (pre-commit)
+
+`fix-format.py` が、ステージした内容の次の事故をコミットの前に直す。コミットは止めない
+(直せないものは知らせるだけ)。直したファイルはメッセージで知らせる。
+
+- 改行の混在 (1 本のファイルに CRLF と LF が混ざったもの): HEAD の形式に揃える。
+  HEAD に無い新しいファイルは、多い方に揃える。
+- BOM: リポジトリに `.github/scripts/bom_policy.py` があればその決まりに合わせる。
+  無ければ、HEAD で BOM の無かったファイルに付いた BOM だけを外す。
+
+ファイル全体の CRLF <-> LF の変換は、意図した変換と区別できないので直さずに知らせるだけ。
+`.gitattributes` で git が改行を正規化するファイル (`text` / `text=auto`) とバイナリは触らない。
+作業ツリーは、ステージと同じ中身のときだけ直す (`git add -p` で一部だけステージしたファイルは触らない)。
+`git commit <パス>` では、コミットと作業ツリーは直るが、ステージに直す前の内容が残る
+(git がコミットの間ステージをロックしているため)。`git add <パス>` で揃う。
+
+```sh
+git config nox.fixFormat false     # このリポジトリでは直さない
+NOX_FIX_FORMAT=0 git commit ...    # このコミットだけ直さない
+```
 
 ### 対象のリポジトリ
 
