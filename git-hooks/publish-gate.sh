@@ -1,5 +1,5 @@
 #!/bin/sh
-# 公開リポジトリへの push を、非公開リポジトリを経由したものだけに絞る (pre-push から呼ぶ)。
+# 公開リポジトリへの push を、非公開リポジトリを経由し、公開前レビューを通ったものだけに絞る (pre-push から呼ぶ)。
 #
 #   publish-gate.sh <push 先の URL> <local_sha> <remote_sha>
 #
@@ -21,7 +21,7 @@ line=$(grep -v '^#' "$DIR/publish-gated.txt" 2>/dev/null | awk -v s="$slug" 'tol
 [ -n "$line" ] || exit 0
 # shellcheck disable=SC2086
 set -- $line
-staging=$2 prefix=$3
+staging=$2 prefix=$3 reviews=${4:-}
 
 fail() {
   echo "publish-gate: $slug への push を止めた。$1" >&2
@@ -56,7 +56,10 @@ for c in $commits; do
   if ! grep -qxF "$tree" "$allowed"; then
     echo "  [UNSTAGED] $(git log -1 --format='%h %s' "$c") — このツリーは $staging の $prefix/ に無い" >&2
     bad=1
+  elif [ -n "$reviews" ] && [ -z "$(git -C "$cache" ls-tree --name-only main -- "$reviews/$tree.pass")" ]; then
+    echo "  [UNREVIEWED] $(git log -1 --format='%h %s' "$c") — このツリーの公開前レビューの PASS 記録が $staging の $reviews/ に無い" >&2
+    bad=1
   fi
 done
-[ "$bad" -eq 0 ] || fail "非公開リポジトリを経由していないコミットがある。"
+[ "$bad" -eq 0 ] || fail "非公開リポジトリを経由していないか、公開前レビューを通っていないコミットがある。"
 exit 0
