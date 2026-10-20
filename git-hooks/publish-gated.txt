@@ -7,4 +7,3 @@
 # つまり「先に非公開リポジトリの <置き場> に入れて push し、そのツリーをそのまま公開する」以外の経路を止める。
 # <レビュー記録の置き場> を書いたときは、さらにそのツリーの公開前レビューの PASS 記録
 # (非公開リポジトリの main にある <レビュー記録の置き場>/<ツリーのハッシュ>.pass) を求める。
-noxitro/agent-toolkit noxitro/agent-toolkit-private public
