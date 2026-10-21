@@ -15,11 +15,16 @@ if ! nox_hooks_enabled "${2:-}"; then
 fi
 ZERO=0000000000000000000000000000000000000000
 status=0
+# 組織の文脈を書いてよい非公開リポジトリへの push なら、その語の検査だけを外す (enabled.sh)。
+nox_org_context_allowed "${2:-}" && export NOX_ALLOW_ORG_CONTEXT=1
 PY=$(sh "$DIR/find-python.sh")
 [ -n "$PY" ] || echo "pre-push: Python が見つからないので外部資料名の検査を飛ばす" >&2
 
 while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue          # ブランチ削除
+
+  # 非公開リポジトリを経由しない公開を止める (publish-gated.txt に載った公開リポジトリだけ)。
+  sh "$DIR/publish-gate.sh" "${2:-}" "$local_sha" "$remote_sha" || status=1
 
   if [ "$remote_sha" = "$ZERO" ]; then
     # 新規ブランチ。既に push 済みのものを除いた範囲だけ見る。
