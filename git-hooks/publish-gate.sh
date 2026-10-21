@@ -27,7 +27,6 @@ staging=$2 prefix=$3 reviews=${4:-}
 fail() {
   echo "publish-gate: $slug への push を止めた。$1" >&2
   echo "  公開する内容は、先に $staging の $prefix/ に入れて main に push し、そのツリーを公開側へ写す" >&2
-  echo "  (agent-toolkit-private の scripts/publish-public.mjs)。" >&2
   exit 1
 }
 
