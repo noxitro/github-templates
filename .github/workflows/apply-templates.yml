@@ -1,0 +1,94 @@
+# templates/ の雛形を、指定したリポジトリへ PR で入れる。本体は scripts/apply-templates.sh。
+#
+# 使い方: Actions → 「雛形を配布」→ Run workflow
+#   repo          … 対象のリポジトリ名。カンマ区切りで複数可。all で全リポジトリ (フォーク・アーカイブ済みを除く)
+#   secret_scan / claude / session_start … 入れる雛形
+#   overwrite     … 雛形と中身の違う既存ファイルも雛形の版に置き換える
+#   dry_run       … PR を作らず、何をするかだけログに出す
+#
+# 既に同じ中身のファイルは触らない。中身の違うファイルは既定では上書きせず、PR の本文に載せる。
+# PR はトークンの持ち主の名義で作るので、PR の CI (Secret scan など) もそのまま走る。マージは各リポジトリで人が判断する。
+#
+# GITHUB_TOKEN ではほかのリポジトリに push できないので、fine-grained トークンを
+# Environment「templates」の Secret の TEMPLATES_TOKEN に入れておく (README 参照)。
+# ルールセットの RULESET_TOKEN (Administration) とは権限を分ける。
+name: 雛形を配布
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "対象のリポジトリ名 (カンマ区切りで複数可。all で全リポジトリ)"
+        required: true
+      secret_scan:
+        description: "Secret scan (.github/workflows/secret-scan.yml)"
+        type: boolean
+        default: true
+      claude:
+        description: "Claude のコメント起動 (.github/workflows/claude.yml)"
+        type: boolean
+        default: false
+      session_start:
+        description: "クラウドのセッションでフックを入れる (.claude/)"
+        type: boolean
+        default: false
+      overwrite:
+        description: "雛形と中身の違う既存ファイルも置き換える"
+        type: boolean
+        default: false
+      dry_run:
+        description: "PR を作らず、何をするかだけ出す"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# 同じリポジトリの templates/apply ブランチを 2 本の実行で取り合わないように
+concurrency:
+  group: apply-templates
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # TEMPLATES_TOKEN は main からしか使えない Environment に置く (README 参照)
+    environment: templates
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: 配布
+        env:
+          GH_TOKEN: ${{ secrets.TEMPLATES_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPOS: ${{ inputs.repo }}
+          OVERWRITE: ${{ inputs.overwrite }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+          IN_SECRET_SCAN: ${{ inputs.secret_scan }}
+          IN_CLAUDE: ${{ inputs.claude }}
+          IN_SESSION_START: ${{ inputs.session_start }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Environment templates の Secret TEMPLATES_TOKEN が未設定。README の手順で登録する"
+            exit 1
+          fi
+
+          sets=()
+          [ "$IN_SECRET_SCAN" = "true" ] && sets+=(secret-scan)
+          [ "$IN_CLAUDE" = "true" ] && sets+=(claude)
+          [ "$IN_SESSION_START" = "true" ] && sets+=(session-start)
+          if [ ${#sets[@]} -eq 0 ]; then
+            echo "::error::入れる雛形が 1 つも選ばれていない"
+            exit 1
+          fi
+          SETS=$(IFS=,; echo "${sets[*]}")
+          export SETS
+
+          # git の clone / push に GH_TOKEN を使わせる
+          gh auth setup-git
+          bash scripts/apply-templates.sh
