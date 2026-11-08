@@ -236,10 +236,12 @@ python3 ~/.config/nox/github-templates/git-hooks/check-external-names.py --hash 
 PR は作業ブランチ `templates/apply` から、トークンの持ち主の名義で作る。流し直すとブランチを既定ブランチから
 作り直すので、開いている PR があればその中身が置き換わる。PR の本文には、マージしたあとにやること
 (Claude の Secret の登録、必須チェックの追加など) が載る。
+雛形が別の経路で入って差分が無くなったときは「変更なし」で終わり、開いたままの PR とブランチは残るので手で閉じる。
 
 非公開リポジトリに入れたワークフローの実行時間は、Actions の無料枠から引かれる。
 
 手元で試すときは、gh でログインした状態で次のようにする (push も PR もしない)。
+非公開リポジトリも clone するので、git が GitHub の資格情報を使えない環境では先に `gh auth setup-git` を実行しておく。
 
 ```sh
 OWNER=noxitro REPOS=nox-voice SETS=secret-scan,claude DRY_RUN=1 bash scripts/apply-templates.sh

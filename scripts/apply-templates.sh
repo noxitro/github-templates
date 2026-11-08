@@ -55,8 +55,12 @@ if [ "${1:-}" = "--one" ]; then
     echo "⏭️  $repo: アーカイブ済み"
     exit 0
   fi
+  # 空のリポジトリは既定ブランチにコミットが無く clone できない。失敗ではなく対象外とする
+  if ! git ls-remote -q --exit-code "https://github.com/$OWNER/$repo.git" "refs/heads/$default" >/dev/null 2>&1; then
+    echo "⏭️  $repo: 既定ブランチ $default が無い (空のリポジトリ)"
+    exit 0
+  fi
   if ! git clone -q --depth 1 --branch "$default" "https://github.com/$OWNER/$repo.git" "$work/repo" 2>"$work/clone.err"; then
-    # 空のリポジトリは既定ブランチが無く clone できない
     echo "::warning::$repo: clone できない ($(tr '\n' ' ' <"$work/clone.err"))"
     exit 1
   fi
@@ -72,7 +76,9 @@ if [ "${1:-}" = "--one" ]; then
     for f in $files; do
       dst="$dir/$f"
       # .gitignore で外しているパス (.claude/ を丸ごと外しているリポジトリなど) は、意図して外しているとみなす
-      if git -C "$dir" check-ignore -q --no-index -- "$f"; then
+      # (ignore していても git add -f で追跡しているファイルは対象にする)
+      if ! git -C "$dir" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 &&
+        git -C "$dir" check-ignore -q --no-index -- "$f"; then
         skipped+=("\`$f\`: .gitignore で外している。入れるなら .gitignore を直してから流し直す")
         continue
       fi
@@ -167,7 +173,13 @@ fi
 if [ "${DRY_RUN:-0}" != "1" ]; then
   # コミットの名義はトークンの持ち主にする (noreply のアドレス)
   if [ -z "${GIT_NAME:-}" ] || [ -z "${GIT_EMAIL:-}" ]; then
-    IFS=$'\t' read -r login uid <<<"$(gh api user --jq '[.login, .id] | @tsv')"
+    # ヒアストリングの中のコマンド置換には set -e が効かないので、先に変数へ受けて失敗を拾う
+    me=$(gh api user --jq '[.login, .id] | @tsv')
+    IFS=$'\t' read -r login uid <<<"$me"
+    if [ -z "$login" ] || [ -z "$uid" ]; then
+      echo "::error::トークンの持ち主を取得できない (gh api user)"
+      exit 1
+    fi
     export GIT_NAME="$login" GIT_EMAIL="$uid+$login@users.noreply.github.com"
   fi
 fi
@@ -179,6 +191,7 @@ else
 fi
 
 failed=()
+set -f   # 入力の * や ? をファイル名に展開させない
 for repo in $targets; do
   if [ "$repo" = "$self" ]; then
     echo "⏭️  $repo: このリポジトリ自身には入れない (自前の Self check で検査している)"
@@ -188,6 +201,7 @@ for repo in $targets; do
     failed+=("$repo")
   fi
 done
+set +f
 
 if [ ${#failed[@]} -gt 0 ]; then
   echo "::error::失敗したリポジトリ: ${failed[*]}"
