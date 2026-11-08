@@ -13,6 +13,10 @@ on:
   pull_request_review:
     types: [submitted]
 
+# 既定は読むだけにする。いま唯一の job は下で権限を与えているが、job を足したときに広い既定が付かないように。
+permissions:
+  contents: read
+
 jobs:
   claude:
     # 共通側の job が使う権限。呼び出し側で与えないと共通側では広げられない。

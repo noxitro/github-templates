@@ -15,6 +15,7 @@
 | `.github/workflows/secret-scan.yml` | 同じ検査を CI で行う共通ワークフロー (各リポジトリから呼ぶ) |
 | `.github/workflows/claude-agent.yml` | PR / Issue のコメント (`/claude ...`) で Claude にレビューや質問をさせる共通ワークフロー |
 | `templates/` | 各リポジトリに置く薄い設定 (共通ワークフローの呼び出しと、クラウドのセッションでフックを入れる設定) |
+| `.github/workflows/apply-templates.yml`、`scripts/apply-templates.sh` | `templates/` を指定リポジトリへ PR で入れる Actions |
 
 ## ブラウザだけで取り込む (Actions)
 
@@ -176,6 +177,8 @@ gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無
 
 ### 各リポジトリに置くもの (`templates/`)
 
+入れ方は下の「[雛形を各リポジトリへ配る](#雛形を各リポジトリへ配る-actions)」。手で写してもよい。
+
 | パス | 役目 |
 |---|---|
 | `.github/workflows/secret-scan.yml` | 共通の Secret scan を呼ぶ。必須チェックにするときのジョブ名は `scan / Scan` |
@@ -199,6 +202,50 @@ python3 ~/.config/nox/github-templates/git-hooks/check-external-names.py --hash 
 
 `git-hooks/install-gitleaks.sh` の `GITLEAKS_VERSION` と `GITLEAKS_SHA256_*` だけを直す
 (SHA256 はリリースの checksums.txt から写す)。CI とクラウドのセッションは両方ここから入れる。
+
+## 雛形を各リポジトリへ配る (Actions)
+
+`templates/` の雛形を、対象のリポジトリへ PR で入れる。マージは各リポジトリで自分が判断する。
+既に同じ中身のファイルは触らず、中身の違うファイル (リポジトリ固有に直したもの) は既定では上書きしない。
+`.gitignore` で外しているパスにも入れない。入れなかったものは PR の本文とログに出る。
+
+### 最初に 1 回だけ: トークンを登録
+
+ルールセットの `RULESET_TOKEN` (Administration) とは別のトークンにする。
+
+1. **Settings (自分のアカウント) → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**
+   - Repository access: **All repositories**
+   - Permissions → Repository permissions → **Contents / Pull requests / Workflows: Read and write**
+     (`.github/workflows/` のファイルを push するには Workflows が要る)
+2. このリポジトリの **Settings → Environments → New environment**
+   - Name: `templates`
+   - **Deployment branches and tags** を **Selected branches and tags** にし、ブランチ `main` だけを許可する
+3. その Environment の **Environment secrets** に `TEMPLATES_TOKEN` として 1 のトークンを登録する
+
+置き場所を main 限定の Environment にする理由は `RULESET_TOKEN` と同じ (作業ブランチの workflow から全リポジトリに書けてしまうため)。
+
+### 配るたびに
+
+1. このリポジトリの **Actions → 雛形を配布 → Run workflow** (ブランチは `main` のまま)
+2. 入力して実行
+   - `repo`: 対象のリポジトリ名。カンマ区切りで複数可。`all` なら全リポジトリ (フォーク・アーカイブ済み・このリポジトリ自身を除く)
+   - `secret_scan` / `claude` / `session_start`: 入れる雛形
+   - `overwrite`: 雛形と中身の違う既存ファイルも雛形の版に置き換える (`.claude/settings.json` はほかの設定も入るので置き換えない)
+   - `dry_run`: 既定は ON。PR を作らず、何を入れるかだけログに出す。確かめてから OFF で流し直す
+
+PR は作業ブランチ `templates/apply` から、トークンの持ち主の名義で作る。流し直すとブランチを既定ブランチから
+作り直すので、開いている PR があればその中身が置き換わる。PR の本文には、マージしたあとにやること
+(Claude の Secret の登録、必須チェックの追加など) が載る。
+雛形が別の経路で入って差分が無くなったときは「変更なし」で終わり、開いたままの PR とブランチは残るので手で閉じる。
+
+非公開リポジトリに入れたワークフローの実行時間は、Actions の無料枠から引かれる。
+
+手元で試すときは、gh でログインした状態で次のようにする (push も PR もしない)。
+非公開リポジトリも clone するので、git が GitHub の資格情報を使えない環境では先に `gh auth setup-git` を実行しておく。
+
+```sh
+OWNER=noxitro REPOS=nox-voice SETS=secret-scan,claude DRY_RUN=1 bash scripts/apply-templates.sh
+```
 
 ## Claude (コメントでレビューを頼む)
 

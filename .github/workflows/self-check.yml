@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh; do
+          for f in git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh scripts/*.sh; do
             sh -n "$f" && echo "ok: $f"
           done
           python3 -m py_compile git-hooks/check-external-names.py
@@ -45,4 +45,4 @@ jobs:
             exit 1
           fi
       - name: ShellCheck
-        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh
+        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh scripts/*.sh
