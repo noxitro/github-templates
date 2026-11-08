@@ -43,8 +43,15 @@ NDA_RE='#include[[:space:]]*[<"](nn|sce)[/_]|(^|[^A-Za-z0-9_:])nn::[a-z]+::|(^|[
 # ログに紛れ込む形で実際に混入したので、値を固定せず実行環境から取る。
 # 大文字小文字は揃わない (hostname は小文字、Windows の表示は大文字) ので -i で見る。
 re_escape() { printf '%s' "$1" | sed 's/[][\.*^$/]/\\&/g'; }
-ME=$(id -un 2>/dev/null || printf '%s' "${USERNAME:-}")
-HOST=$(hostname 2>/dev/null || printf '%s' "${COMPUTERNAME:-}")
+# GitHub Actions で取れるのはランナーのアカウント名 (runner) とホスト名で、作者のものではない。
+# runner は @vitest/runner/ のような依存のパスにも現れて誤検出になるので、CI ではこの検査を外す。
+# 作者のユーザー名は手元の pre-commit / pre-push が見る。Users 配下の絶対パスは CI でも PERSONAL_RE が拾う。
+ME=''
+HOST=''
+if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  ME=$(id -un 2>/dev/null || printf '%s' "${USERNAME:-}")
+  HOST=$(hostname 2>/dev/null || printf '%s' "${COMPUTERNAME:-}")
+fi
 LOCAL_RE=''
 if [ -n "$ME" ]; then
   ME_RE=$(re_escape "$ME")
