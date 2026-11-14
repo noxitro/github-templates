@@ -1,0 +1,112 @@
+# BOM と改行コード (CRLF / LF) の検査の共通ワークフロー。各リポジトリから workflow_call で呼ぶ。
+# 呼び出し側の雛形は templates/.github/workflows/file-format.yml。
+#
+# 書き換えツールが BOM を剥がす・ファイル全体の改行を一括変換する・CRLF のファイルに LF の行を
+# 混ぜる、といった事故を拾う。改行はファイルごとの「元の形式を保つ」ことを、変更の前後の比較で見る。
+# 作業ブランチは既定ブランチとの分岐点から、既定ブランチは push の前後で比べる。
+# 検査の中身は scripts/file-format/check-file-format.py。
+# 意図して変換するときは、コミットメッセージに「Format-Change: <パス or glob>」の行を書く。
+#
+# BOM の決まりは、呼び出し側に .github/scripts/bom_policy.py があればそれを使う
+# (無ければ scripts/file-format/bom_policy.py: *.ps1 / *.psm1 / *.psd1 だけ BOM 必須)。
+
+name: File format (共通)
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: "比較元のリビジョン (空なら push の種類から決める)"
+        type: string
+        default: ""
+      hooks-ref:
+        description: "検査スクリプトを取るこのリポジトリの ref。呼び出しを @<ref> で固定したときは同じ値を渡す"
+        type: string
+        default: main
+    secrets:
+      DISCORD_WEBHOOK_URL:
+        description: "失敗したときに通知する Discord の Webhook (任意)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: BOM / line endings
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # push の直前の地点や既定ブランチとの分岐点まで遡るため
+
+      - uses: actions/checkout@v7
+        with:
+          repository: noxitro/github-templates
+          ref: ${{ inputs.hooks-ref }}
+          path: .nox-hooks
+          persist-credentials: false
+
+      - name: Check
+        id: check
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          INPUT_BASE: ${{ inputs.base }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -uo pipefail
+          # 比較元を決める。
+          #   作業ブランチ  : 既定ブランチとの分岐点から累積で比べる。事故と、それを直す
+          #                   コミットが相殺されるので、直した push が咎められない。
+          #   既定ブランチ  : push 前の地点 (before)。取れなければ失敗にする。
+          #   入力の base   : それを使う。pull_request などでは直前のコミット
+          # base が head の祖先でなければ、スクリプト側で分岐点に置き換える。
+          ZERO=0000000000000000000000000000000000000000
+          default="${DEFAULT_BRANCH:-main}"
+          base=''
+          if [ -n "${INPUT_BASE}" ]; then
+            base="${INPUT_BASE}"
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" != "refs/heads/${default}" ]; then
+            mb=$(git merge-base "origin/${default}" HEAD 2>/dev/null || true)
+            if [ -z "$mb" ]; then
+              echo "${default} と共通の祖先が無い。検査しない"
+              exit 0
+            elif [ "$mb" = "$(git rev-parse HEAD)" ]; then
+              echo "${default} に既にあるコミットを指すだけの push なので、検査するものが無い"
+              exit 0
+            fi
+            base="$mb"
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${BEFORE}" ] && [ "${BEFORE}" != "$ZERO" ]; then
+            # 範囲を黙って HEAD^ に狭めず失敗させる (途中のコミットの事故が素通りするため)
+            git cat-file -e "${BEFORE}^{commit}" 2>/dev/null || git fetch -q --no-tags origin "${BEFORE}" 2>/dev/null || true
+            if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              echo "::error::push 前の地点 ${BEFORE} を取得できないので、この push の範囲を検査できない。手動実行で base を指定して検査すること"
+              exit 1
+            fi
+            base="${BEFORE}"
+          elif git rev-parse --verify --quiet HEAD^ >/dev/null; then
+            base="HEAD^"
+          fi
+          if [ -z "$base" ]; then
+            echo "比較元が無い (ルートコミットだけ)。検査しない"
+            exit 0
+          fi
+          echo "比較元: $base"
+          python3 .nox-hooks/scripts/file-format/check-file-format.py --base "$base" --head HEAD --report "$RUNNER_TEMP/format-report.md"
+
+      # 転んだときだけ Discord に流す。Secret が無ければ警告だけでスキップする。
+      - name: Notify Discord
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -s "$RUNNER_TEMP/format-report.md" ] || echo "検査スクリプトが途中で失敗した。ログを確認すること" > "$RUNNER_TEMP/format-report.md"
+          python3 .nox-hooks/scripts/discord_webhook.py \
+            --title ":x: ファイル形式 — ${GITHUB_REPOSITORY} (${GITHUB_REF_NAME})" \
+            --description-file "$RUNNER_TEMP/format-report.md" \
+            --color red --url "$RUN_URL" \
+            --footer "${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER} · ${GITHUB_SHA::7}"
