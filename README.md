@@ -13,8 +13,14 @@
 | `.github/workflows/apply-ruleset.yml` | 上のテンプレートを指定リポジトリへ取り込む Actions |
 | `git-hooks/` | 公開してはいけないものを commit / push の前に止める git フック (全リポジトリ共通) |
 | `.github/workflows/secret-scan.yml` | 同じ検査を CI で行う共通ワークフロー (各リポジトリから呼ぶ) |
+| `.github/workflows/file-format.yml` | BOM と改行コードの事故 (一括変換・混在・BOM の付け外し) を拾う共通ワークフロー |
+| `.github/workflows/workflow-lint.yml` | ワークフローの静的検査 (actionlint) と Python スクリプトの ruff の共通ワークフロー |
+| `.github/workflows/dependency-review.yml` | PR で増える依存の脆弱性とライセンスを検査する共通ワークフロー |
 | `.github/workflows/claude-agent.yml` | PR / Issue のコメント (`/claude ...`) で Claude にレビューや質問をさせる共通ワークフロー |
-| `templates/` | 各リポジトリに置く薄い設定 (共通ワークフローの呼び出しと、クラウドのセッションでフックを入れる設定) |
+| `.github/workflows/self-check.yml` | このリポジトリ自身の検査 (共通ワークフローを変更した版のまま動かす) |
+| `scripts/file-format/` | `file-format.yml` の検査本体と、BOM を外す `strip-bom.py` |
+| `scripts/discord_webhook.py` | 共通ワークフローから失敗を Discord に流す |
+| `templates/` | 各リポジトリに置く薄い設定 (共通ワークフローの呼び出し・Dependabot・SECURITY.md・PR テンプレートなど) |
 
 ## ブラウザだけで取り込む (Actions)
 
@@ -179,12 +185,86 @@ gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無
 | パス | 役目 |
 |---|---|
 | `.github/workflows/secret-scan.yml` | 共通の Secret scan を呼ぶ。必須チェックにするときのジョブ名は `scan / Scan` |
+| `.github/workflows/file-format.yml` | 共通の File format を呼ぶ (下の「ファイル形式の検査」)。ジョブ名は `check / BOM / line endings` |
+| `.github/workflows/workflow-lint.yml` | 共通の Workflow lint を呼ぶ。ジョブ名は `lint / Workflow lint` |
+| `.github/workflows/dependency-review.yml` | 共通の Dependency review を呼ぶ。依存のマニフェストがある公開リポジトリだけ |
+| `.github/workflows/claude.yml` | 共通の Claude を呼ぶ (下の「Claude」) |
+| `.github/dependabot.yml` | Dependabot の更新対象。GitHub Actions は全リポジトリ、ほかは使うエコシステムだけ残す |
+| `.github/scripts/bom_policy.py` | BOM の決まりを変えるときだけ置く (既定は `*.ps1` / `*.psm1` / `*.psd1` だけ BOM 必須) |
+| `.github/PULL_REQUEST_TEMPLATE.md` | PR の確認項目。リポジトリのテストのコマンドに直す |
+| `.editorconfig` | 文字コードの既定 (`bom_policy.py` と揃える)。改行コードは決めない |
+| `SECURITY.md` | 脆弱性の報告先 (Private vulnerability reporting)。使っている対策だけ表に残す |
+| `AGENTS.snippet.md` | 各リポジトリの AGENTS.md / CLAUDE.md に写す共通の決まり (AI はマージしない、など) |
 | `.claude/settings.json`、`.claude/hooks/session-start.sh` | Claude Code on the web のセッション開始時に、このリポジトリを clone してフックと gitleaks を入れる |
 
 リポジトリ固有の除外は、各リポジトリのルートに置く。
 
 - `.githooks-allow`: `scan.sh` の検査から外すパス (1 行 1 パス、完全一致)。理由をコメントで残す。
 - `.gitleaks.toml`: gitleaks の設定。無ければ `git-hooks/gitleaks.toml` を使う。置くときは共通側を写して allowlist を足す。
+- `.gitleaksignore`: gitleaks の誤検知を 1 件ずつ外す (ルールは緩めない)。行は gitleaks が出す
+  Finding の fingerprint (`<コミット>:<パス>:<ルール>:<行>`)。上に理由をコメントで残す。
+
+```text
+# ServiceAccountAuthTest は鍵をテストの中で生成し、PEM の見出しを文字列で付けているだけ
+<コミット>:app/src/test/.../ServiceAccountAuthTest.kt:private-key:34
+```
+
+### 新しいリポジトリの初期設定
+
+`templates/` の中から使うものを写したうえで、リポジトリの設定を揃える。
+
+1. **Settings → Code security**: Dependabot alerts / security updates、Secret scanning と Push protection、
+   Private vulnerability reporting を有効にする (公開リポジトリならすべて無料)。
+2. ルールセットを取り込む (上の「取り込むたびに」)。必須チェックには `scan / Scan` と CI のジョブ名を入れる。
+3. MIT などの `LICENSE` を置く (`scan.sh` のライセンス検査は MIT と両立するかを見る)。
+
+CodeQL は言語ごとに設定が違うので共通にしていない。**Settings → Code security → Code scanning →
+Set up → Default** で足りる。ビルド手順を変えたい (C++ / C# / Kotlin など) ときだけ
+`github/codeql-action` の `init` / `analyze` を使うワークフローを各リポジトリに置く。
+
+## ファイル形式の検査
+
+`.github/workflows/file-format.yml` (本体は `scripts/file-format/check-file-format.py`) が、
+書き換えツールが BOM を剥がす・ファイル全体の改行を一括変換する・CRLF のファイルに LF の行を
+混ぜる、といった事故を CI で拾う。pre-commit の `fix-format.py` が手元で直すものの取りこぼしを止める層。
+
+- 比べる範囲: 作業ブランチは既定ブランチとの分岐点から、既定ブランチは push の前後。
+  作業ブランチで事故を直すコミットを足せば、累積では相殺されて通る。
+- 改行: ファイルごとに元の形式 (CRLF / LF) を保っているかを見る。新しいファイルは混在だけを見る。
+- BOM: `.github/scripts/bom_policy.py` があればその決まり、無ければ `scripts/file-format/bom_policy.py`。
+- 意図して変換するときは、コミットメッセージに `Format-Change: <パス or glob>` の行を書く。
+- 失敗を Discord に流すときは、Secret `DISCORD_WEBHOOK_URL` を作って呼び出し側の `secrets:` で渡す。
+
+手元で確かめる・BOM を外す:
+
+```sh
+T=~/.config/nox/github-templates
+python3 $T/scripts/file-format/check-file-format.py --base origin/main   # main との分岐点から比べる
+python3 $T/scripts/file-format/strip-bom.py <パス>...                     # 決まりに反する BOM を外す
+```
+
+## ワークフローの静的検査
+
+`.github/workflows/workflow-lint.yml` が actionlint (式の型・未定義の入力・`run:` の shellcheck) と、
+`python-paths` で指定したパスの ruff (構文エラーと未定義名だけ) を走らせる。
+版を上げるときは、ファイル先頭の `env` の版と SHA256 だけを直す (SHA256 は actionlint のリリースの checksums.txt から写す)。
+
+## 依存の検査 (Dependabot / Dependency review)
+
+`templates/.github/dependabot.yml` は GitHub Actions の更新を全リポジトリで週 1 回、同じ action の更新を
+1 本の PR にまとめる。npm / NuGet / Gradle などは使うものだけコメントを外す
+(minor と patch はまとめ、major は挙動が変わりうるので個別の PR に残す)。
+
+`.github/workflows/dependency-review.yml` は PR で増える依存に、既定で moderate 以上の脆弱性か
+GPL / LGPL / AGPL のライセンスがあれば失敗させる (`git-hooks/scan.sh` のライセンス検査と同じ考え)。
+`fail-on-severity` と `deny-licenses` で変えられる。
+
+## AI エージェントの決まり
+
+`templates/AGENTS.snippet.md` を各リポジトリの AGENTS.md / CLAUDE.md に写す。
+要点は、AI は作業ブランチで PR を作るまでで、既定ブランチへのマージはユーザーが行うこと
+(「進めて」「全部やって」はマージの許可ではない)。ルールセットは承認数 0 なので、
+ユーザーの身元で動く AI のマージは仕組みでは止まらず、この決まりで止める。
 
 ### 外部資料の名前を足す
 
