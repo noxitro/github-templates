@@ -1,0 +1,33 @@
+# Dependabot の更新対象。公開リポジトリなら無料で使える。
+# 使うエコシステムのブロックだけ残し、directory を実際の場所に直す。
+
+version: 2
+updates:
+  # GitHub Actions 自体の更新 (actions/checkout@v4 のような参照が古くなるのを拾う)。
+  # directory: / だけだと .github/workflows/ しか見ない。composite action
+  # (.github/actions/*/action.yml) があれば directories に足さないと取り残される。
+  - package-ecosystem: github-actions
+    directories:
+      - /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    # 同じ action の更新を、ディレクトリをまたいで 1 本の PR にする (片方だけマージされて版がずれないように)
+    groups:
+      actions:
+        group-by: dependency-name
+
+  # 例: npm / nuget / gradle / pip など。minor と patch は 1 本の PR にまとめ、major は個別に残す。
+  # - package-ecosystem: npm
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #   open-pull-requests-limit: 5
+  #   groups:
+  #     minor-patch:
+  #       patterns:
+  #         - "*"
+  #       update-types:
+  #         - minor
+  #         - patch

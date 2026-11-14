@@ -1,0 +1,49 @@
+# PR で増える依存の脆弱性とライセンスを検査する共通ワークフロー。各リポジトリから workflow_call で呼ぶ。
+# 呼び出し側の雛形は templates/.github/workflows/dependency-review.yml。
+#
+# GitHub の依存関係グラフを使うので、公開リポジトリ (または GitHub Advanced Security) でだけ動く。
+# 依存のマニフェスト (package.json / *.csproj / build.gradle など) が無いリポジトリでは何もしない。
+#
+# 既定の deny-licenses は MIT で配るリポジトリと両立しないもの (git-hooks/scan.sh の
+# ライセンス検査と同じ考え)。
+
+name: Dependency review (共通)
+
+on:
+  workflow_call:
+    inputs:
+      fail-on-severity:
+        description: "この重大度以上の脆弱性で失敗させる (low / moderate / high / critical)"
+        type: string
+        default: moderate
+      deny-licenses:
+        description: "失敗させるライセンス (SPDX ID のカンマ区切り)。空なら検査しない"
+        type: string
+        default: "GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later, LGPL-3.0-only, LGPL-3.0-or-later"
+      comment-summary-in-pr:
+        description: "PR に結果をコメントする (always / on-failure / never)"
+        type: string
+        default: on-failure
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write   # comment-summary-in-pr のため
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          deny-licenses: ${{ inputs.deny-licenses }}
+          comment-summary-in-pr: ${{ inputs.comment-summary-in-pr }}

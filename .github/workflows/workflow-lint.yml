@@ -1,0 +1,72 @@
+# GitHub Actions のワークフローの静的検査の共通ワークフロー。各リポジトリから workflow_call で呼ぶ。
+# 呼び出し側の雛形は templates/.github/workflows/workflow-lint.yml。
+#
+# actionlint: 式の型・未定義の入力や出力・run: の中のシェル (shellcheck) の誤りを拾う。
+# ruff     : ワークフローから呼ぶ Python スクリプトの構文エラーと未定義名だけを見る (python-paths)。
+#
+# actionlint と ruff の版を上げるときは、下の env の版と SHA256 を直す
+# (SHA256 は actionlint のリリースの checksums.txt から写す)。
+
+name: Workflow lint (共通)
+
+on:
+  workflow_call:
+    inputs:
+      python-paths:
+        description: "ruff で検査するパス (空白区切り)。存在しないパスは飛ばす。空なら ruff を走らせない"
+        type: string
+        default: ".github/scripts"
+
+permissions:
+  contents: read
+
+env:
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+  RUFF_VERSION: "0.16.9"
+
+jobs:
+  lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          sudo install -m 0755 "$RUNNER_TEMP/actionlint" /usr/local/bin/actionlint
+          command -v shellcheck >/dev/null || echo "::warning::shellcheck が無いので run: の中のシェルは検査しない"
+
+      - name: actionlint
+        shell: bash
+        run: actionlint -color
+
+      - name: ruff
+        if: inputs.python-paths != ''
+        shell: bash
+        env:
+          PYTHON_PATHS: ${{ inputs.python-paths }}
+        run: |
+          set -euo pipefail
+          paths=()
+          for p in $PYTHON_PATHS; do
+            [ -e "$p" ] && paths+=("$p")
+          done
+          if [ "${#paths[@]}" -eq 0 ]; then
+            echo "検査する Python のパスが無い"
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/ruff"
+          "$RUNNER_TEMP/ruff/bin/pip" install --quiet "ruff==${RUFF_VERSION}"
+          "$RUNNER_TEMP/ruff/bin/ruff" check --select E4,E7,E9,F --output-format github "${paths[@]}"
