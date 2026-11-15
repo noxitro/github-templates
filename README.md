@@ -20,6 +20,7 @@
 | `.github/workflows/self-check.yml` | このリポジトリ自身の検査 (共通ワークフローを変更した版のまま動かす) |
 | `scripts/file-format/` | `file-format.yml` の検査本体と、BOM を外す `strip-bom.py` |
 | `scripts/discord_webhook.py` | 共通ワークフローから失敗を Discord に流す |
+| `scripts/apply-templates.sh` | `templates/` の雛形を各リポジトリへ PR で配る (手元で実行) |
 | `templates/` | 各リポジトリに置く薄い設定 (共通ワークフローの呼び出し・Dependabot・SECURITY.md・PR テンプレートなど) |
 
 ## ブラウザだけで取り込む (Actions)
@@ -211,7 +212,8 @@ gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無
 
 ### 新しいリポジトリの初期設定
 
-`templates/` の中から使うものを写したうえで、リポジトリの設定を揃える。
+`templates/` の中から使うものを写したうえで (共通ワークフローの呼び出しは下の「雛形を配る」で PR にできる)、
+リポジトリの設定を揃える。
 
 1. **Settings → Code security**: Dependabot alerts / security updates、Secret scanning と Push protection、
    Private vulnerability reporting を有効にする (公開リポジトリならすべて無料)。
@@ -221,6 +223,36 @@ gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無
 CodeQL は言語ごとに設定が違うので共通にしていない。**Settings → Code security → Code scanning →
 Set up → Default** で足りる。ビルド手順を変えたい (C++ / C# / Kotlin など) ときだけ
 `github/codeql-action` の `init` / `analyze` を使うワークフローを各リポジトリに置く。
+
+### 雛形を配る (`scripts/apply-templates.sh`)
+
+`templates/` のうち中身を直さずに使えるものを、対象のリポジトリへ PR で入れる。手元で `gh auth login`
+(スコープに `repo` と `workflow`) した状態で、Git Bash などの bash から実行する。
+
+```sh
+# まず DRY_RUN=1 で何が入るかを見る
+OWNER=noxitro REPOS=nox-voice,xtranslator-cli SETS=secret-scan,file-format DRY_RUN=1 bash scripts/apply-templates.sh
+# よければ DRY_RUN を外す。REPOS=all なら全リポジトリ (フォーク・アーカイブ済み・このリポジトリを除く)
+OWNER=noxitro REPOS=all SETS=secret-scan,file-format bash scripts/apply-templates.sh
+```
+
+| 組 (`SETS`) | 入れるファイル |
+| --- | --- |
+| `secret-scan` | `.github/workflows/secret-scan.yml` |
+| `file-format` | `.github/workflows/file-format.yml` |
+| `workflow-lint` | `.github/workflows/workflow-lint.yml` |
+| `dependency-review` | `.github/workflows/dependency-review.yml` (非公開リポジトリには入れない) |
+| `claude` | `.github/workflows/claude.yml` |
+| `session-start` | `.claude/settings.json`、`.claude/hooks/session-start.sh` |
+
+- 既にあって中身が違うファイルは上書きしない (`OVERWRITE=true` で上書き。`.claude/settings.json` は除く)。
+  `.gitignore` で外しているパスにも入れない。どちらも PR の本文に残す。
+- PR のブランチは `templates/apply`。流し直すと、開いている PR の中身が置き換わる。マージは人が行う。
+- `SECURITY.md`・PR テンプレート・`dependabot.yml`・`.editorconfig` はリポジトリごとに中身を直すので配らない。
+
+Actions のワークフローにはしていない。`GITHUB_TOKEN` はほかのリポジトリやワークフローのファイルに書けないので、
+全リポジトリに書けるトークンを Secret に置くことになり、それが漏れるとルールセットを素通りできる持ち主の権限で
+全リポジトリを書き換えられるため。自動にするなら、PAT ではなく対象と権限を絞った GitHub App を使う。
 
 ## ファイル形式の検査
 

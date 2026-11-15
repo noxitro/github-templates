@@ -41,6 +41,10 @@ jobs:
           for f in git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh; do
             sh -n "$f" && echo "ok: $f"
           done
+          # scripts/ は bash 前提 (配列・プロセス置換を使う)
+          for f in scripts/*.sh; do
+            bash -n "$f" && echo "ok: $f"
+          done
           python3 -m py_compile git-hooks/check-external-names.py
           python3 -m py_compile git-hooks/fix-format.py scripts/discord_webhook.py scripts/file-format/*.py templates/.github/scripts/*.py
       # Windows の sh は CRLF のスクリプトを読めない。.gitattributes で LF に固定しているが、
@@ -56,4 +60,4 @@ jobs:
             exit 1
           fi
       - name: ShellCheck
-        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh
+        run: shellcheck -S error git-hooks/pre-commit git-hooks/commit-msg git-hooks/pre-push git-hooks/post-* git-hooks/*.sh templates/.claude/hooks/*.sh scripts/*.sh
