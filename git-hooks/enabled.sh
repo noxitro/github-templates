@@ -24,3 +24,19 @@ nox_hooks_enabled() {
   url=${1:-$(git remote get-url origin 2>/dev/null || true)}
   printf '%s\n' "$url" | grep -qiE "[:/]${NOX_HOOKS_OWNER}/[^/]+/?$"
 }
+
+# remote の URL (省略時は origin) から <owner>/<repo> を取り出す。末尾の .git と / は落とす。
+nox_repo_slug() {
+  url=${1:-$(git remote get-url origin 2>/dev/null || true)}
+  printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | grep -oE '[^/:]+/[^/:]+$' | tr 'A-Z' 'a-z'
+}
+
+# 組織の文脈を書いてよい非公開リポジトリか (org-context-allowed.txt に載っているか)。
+# 載っていれば、所属組織の文脈を示す語の検査だけを外す (NOX_ALLOW_ORG_CONTEXT=1)。
+# 秘密情報・個人情報などほかの検査はそのまま効く。
+# 判定は push 先 / origin の URL で行うので、リポジトリの中身を書き換えても外せない。
+nox_org_context_allowed() {
+  slug=$(nox_repo_slug "${1:-}")
+  [ -n "$slug" ] || return 1
+  grep -v '^#' "$(dirname "$0")/org-context-allowed.txt" 2>/dev/null | tr 'A-Z' 'a-z' | grep -qxF "$slug"
+}

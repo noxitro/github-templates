@@ -1,0 +1,4 @@
+# 所属組織の文脈を書いてよい非公開リポジトリ (<owner>/<repo>、1 行 1 つ)。
+# ここに載せたリポジトリでは org-context-terms.txt の語の検査だけを外す。
+# 公開リポジトリは絶対に載せないこと。載せる前に GitHub で private であることを確かめる。
+noxitro/agent-toolkit-private

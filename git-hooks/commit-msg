@@ -6,6 +6,7 @@ DIR=$(dirname "$0")
 . "$DIR/enabled.sh"
 . "$DIR/chain.sh"
 if nox_hooks_enabled; then
+  nox_org_context_allowed && export NOX_ALLOW_ORG_CONTEXT=1
   PY=$(sh "$DIR/find-python.sh")
   if [ -z "$PY" ]; then
     echo "commit-msg: Python が見つからないので外部資料名の検査を飛ばした" >&2
