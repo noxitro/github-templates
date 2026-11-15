@@ -40,7 +40,7 @@ jobs:
     # RULESET_TOKEN は main からしか使えない Environment に置く (README 参照)
     environment: rulesets
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 適用
         env:
