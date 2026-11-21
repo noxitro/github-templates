@@ -145,7 +145,7 @@ GitHub Secret Protection が要る。いずれにしても、個人メールや�
 (たとえばスクリプトに書いてから実行する push、git の alias、GraphQL でのコミットは見ていない)。
 `push-guard.sh` は、push は単独の 1 行 (`git push origin <ブランチ>` など) で行うことを求める。
 `git add ... && git commit ... && git push` のようにつなげたものは止めるので、push だけを別に実行する。
-push かどうかは引用符の中 (コミットメッセージや PR の本文) を除いて git のサブコマンドで見るので、
+push かどうかは、引用符とヒアドキュメントの中 (コミットメッセージや PR の本文) を除き、コマンドのどこかにある git のサブコマンドで見る (`if ... then git push`、`time git push`、PowerShell の `if ($?) { git push }` も拾う)。そのため、
 `git stash push` や本文に push と書いた `gh pr create` は止めない。
 Bash と MCP のすべての呼び出しで走るが、push などの語を含まない入力は Python を起動せずに抜ける。
 Python が無い環境では、push に関係しうる入力をすべて止める (判定できないまま通さない)。

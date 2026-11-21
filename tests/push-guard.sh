@@ -40,18 +40,34 @@ for c in "git push --no-verify origin x" "git push --no-verif origin x" "git pus
          "GIT_CONFIG_COUNT=1 git push" "git push origin x; echo done" "git push origin x && echo y" \
          "$(printf 'git status\ngit push origin x')" "git push origin x | cat" "(git push origin x)" \
          "git --no-pager push origin x" "git push --repo=https://example.invalid origin" \
-         '"git" push --no-verify origin x' "git push 'origin' x" \
+         '"git" push --no-verify origin x' "git push '--no-verify' origin x" \
          "git add . && git commit -m wip && git push" "git push origin x 2>&1 | tail -5" \
          "gh api -X PUT repos/o/r/contents/a.txt -f message=m" "gh api repos/o/r/git/refs -f ref=refs/heads/x" \
-         "git send-pack origin x"; do
+         "git send-pack origin x" \
+         "if git commit -m x; then git push --no-verify; fi" "for b in a b; do git push origin \$b; done" \
+         "{ git push --no-verify; }" "! git push --no-verify" "time git push --no-verify" \
+         "sudo git push --no-verify" "env X=1 git push --no-verify" "command git push --no-verify" \
+         "echo x | xargs git push --no-verify" "/usr/bin/git push --no-verify origin x"; do
   run deny Bash "$c"
 done
+run allow Bash 'git push origin "work/x"'
+run allow Bash "git push 'origin' x"
+run allow Bash "git push origin work/x 2>&1"
+run allow Bash "git  push  origin work/x"
+run allow Bash "$(printf 'git commit -F - <<EOF\nnote: git push origin main later\nEOF')"
+run allow Bash "$(printf "cat > notes.md <<'EOF'\nrun git push --no-verify\nEOF")"
 
 # PowerShell ツールも同じ判定
 run allow PowerShell "git push origin work/x"
 run deny PowerShell "git push --no-verify origin x"
 run deny PowerShell "git push origin x; Write-Host done"
 run allow PowerShell "git stash push -m wip"
+run deny PowerShell 'git commit -m x; if ($?) { git push --no-verify }'
+run deny PowerShell 'if ($LASTEXITCODE -eq 0) { git -c core.hooksPath=NUL push }'
+run deny PowerShell '& git push --no-verify'
+run deny PowerShell 'git.exe push --no-verify origin x'
+run deny PowerShell '& "C:\Program Files\Git\cmd\git.exe" push --no-verify origin x'
+run deny PowerShell '& "C:\Program Files\Git\cmd\git.exe" -c core.hooksPath=NUL push origin x'
 
 # push ではないもの (誤検出しない)
 for c in "git log --grep 'push'" "cat git-hooks/pre-push" "git status" "echo push it" \
@@ -74,8 +90,9 @@ git -C "$T" config nox.hooks false; run deny Bash "git push origin x"; git -C "$
 (
   n=${GIT_CONFIG_COUNT:-0}
   export "GIT_CONFIG_KEY_$n=core.hooksPath" "GIT_CONFIG_VALUE_$n=/dev/null" GIT_CONFIG_COUNT=$((n + 1))
+  before=$fails
   run deny Bash "git push origin x"
-  exit "$fails"
+  [ "$fails" -eq "$before" ]
 ) || fails=$((fails + 1))
 
 # Python が使えない環境では、push に関係しうる入力を止める (読めないのに通さない)。
