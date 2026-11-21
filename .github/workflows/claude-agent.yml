@@ -11,8 +11,15 @@
 #   CLAUDE_CODE_OAUTH_TOKEN … 必須。手元の Claude Code CLI で `claude setup-token`。
 #       Claude のサブスクリプションの利用枠を使う (API の従量課金はかからない)。
 #   AGENT_APP_ID / AGENT_APP_PRIVATE_KEY … 任意。自前の GitHub App のもの。
-#       両方あれば、その App のトークンで動く (コメントや push がその App の名義になり、
-#       App のトークンでの push は CI も起動する)。無ければ Claude GitHub App で動く。
+#       両方あれば、その App のトークン (このリポジトリだけ・下の権限だけに絞る) で動き、コメントがその App の名義になる。
+#       無ければ GITHUB_TOKEN (呼び出し側の job の permissions) で動き、github-actions[bot] の名義になる。
+#
+# push はさせない: Actions のランナーには共通の git フックが無く、claude-code-action は
+#       セッションの後に残った変更を自分で commit / push する (そのときはフックを切っている)。
+#       公開リポジトリでは push した時点で公開されるので、push 前の検査を通らない経路は塞ぐ。
+#       トークンの Contents を Read にしたうえで、Claude の git push も禁止する。
+#       Claude GitHub App のトークンは Contents の Write が必ず付くので使わない。
+#       変更を入れたいときは、手元かクラウドのセッション (共通のフックが入る) で行う。
 #
 # 権限: 公開リポジトリでは誰でもコメントできる。他人の合図で利用枠を使われないよう、
 #       オーナー・メンバー・共同編集者のコメントだけに反応する。
@@ -69,19 +76,17 @@ jobs:
           echo "::error::Secret CLAUDE_CODE_OAUTH_TOKEN がこのリポジトリに無い。Settings → Secrets and variables → Actions に登録する (github-templates の README)"
           exit 1
 
-      # 資格情報を残さない。checkout v6 以降は GITHUB_TOKEN の認証ヘッダーを
-      # includeIf で読む別ファイルに置き、claude-code-action はそれを消せない。
-      # 残ると git がそのヘッダーを優先して送り、push が GITHUB_TOKEN
-      # (contents: read) の github-actions[bot] 名義になって 403 で拒否される。
-      # push の認証は claude-code-action が remote URL に入れるトークンで足りる。
-      # ただし PR ブランチの fetch はその設定より前に認証なしで行うので、
-      # 非公開リポジトリから呼ぶと fetch で失敗する (呼び出し側は公開リポジトリだけ)。
+      # 資格情報を残さない (checkout v6 以降は GITHUB_TOKEN の認証ヘッダーを
+      # includeIf で読む別ファイルに置き、claude-code-action はそれを消せない)。
+      # PR ブランチの fetch は認証なしで行うので、非公開リポジトリから呼ぶと
+      # fetch で失敗する (呼び出し側は公開リポジトリだけ)。
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
           persist-credentials: false
 
-      # 自前の App があれば、このリポジトリだけに絞ったトークンを発行する。
+      # 自前の App があれば、このリポジトリだけ・読み書きはコメントだけに絞ったトークンを発行する。
+      # permission-* を 1 つでも書くと、書かなかった権限はトークンに付かない。
       - name: GitHub App token
         id: app
         if: env.HAS_AGENT_APP == 'true'
@@ -91,14 +96,21 @@ jobs:
           private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-pull-requests: write
+          permission-issues: write
+          permission-actions: read
 
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # 空なら Claude GitHub App のトークンで動く
-          github_token: ${{ steps.app.outputs.token }}
+          # 自前の App が無ければ GITHUB_TOKEN。空にすると Claude GitHub App のトークン
+          # (Contents の Write が必ず付く) になるので、空にはしない。
+          github_token: ${{ steps.app.outputs.token || github.token }}
           trigger_phrase: ${{ inputs.trigger-phrase }}
           # job の actions: read だけでは Claude 側のトークンに渡らないので、
           # ここでも渡して CI の結果を読めるようにする
           additional_permissions: |
             actions: read
+          # トークンで push できなくしてあるが、Claude が git push を試みて失敗を繰り返さないよう禁止もしておく。
+          claude_args: --disallowedTools "Bash(git push:*)"

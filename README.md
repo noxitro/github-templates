@@ -12,7 +12,7 @@
 | `rulesets/protect-default-branch.json` | 既定ブランチ (`main` など) を守るルールセット |
 | `.github/workflows/apply-ruleset.yml` | 上のテンプレートを指定リポジトリへ取り込む Actions |
 | `git-hooks/` | 公開してはいけないものを commit / push の前に止める git フック (全リポジトリ共通) |
-| `.github/workflows/secret-scan.yml` | 同じ検査を CI で行う共通ワークフロー (各リポジトリから呼ぶ) |
+| `.github/workflows/secret-scan.yml` | push の後に同じ種類の検査を CI で行う共通ワークフロー (各リポジトリから呼ぶ)。公開を防ぐものではなく、フックをすり抜けたものに気付くための予備で、範囲も手元より狭い (下の「push の前に止める」) |
 | `.github/workflows/file-format.yml` | BOM と改行コードの事故 (一括変換・混在・BOM の付け外し) を拾う共通ワークフロー |
 | `.github/workflows/workflow-lint.yml` | ワークフローの静的検査 (actionlint) と Python スクリプトの ruff の共通ワークフロー |
 | `.github/workflows/dependency-review.yml` | PR で増える依存の脆弱性とライセンスを検査する共通ワークフロー |
@@ -122,6 +122,50 @@ CI のジョブ名はリポジトリごとに違うので、テンプレート�
 手元だけで足したい語は `~/.config/nox/private-terms.txt` (1 行 1 語) に書く。
 誤検出はリポジトリの `.githooks-allow` でパスごとに外す。
 
+### push の前に止める (原則)
+
+公開リポジトリでは、push した時点で中身が公開される。push の後に走る CI (Secret scan) では間に合わない。
+GitHub の個人アカウント (Free) には、中身を見て push を拒否するサーバー側の仕組みが無い
+(pre-receive フックは GitHub Enterprise Server だけ。Push protection は提携している発行元のトークン形式と
+一部の汎用パターンしか見ず、独自のパターンは個人の所有するリポジトリでは使えない)。
+そのため、**公開を防げるのは、共通のフックを入れた環境から git で push する経路だけ**で、それ以外の経路は塞ぐか使わない。
+
+| 経路 | push の前の検査 | 扱い |
+|---|---|---|
+| 手元の git (`git push`、内部で git push する `gh pr create` など) | pre-push が走る | 共通のフックを入れておく (下の「手元で有効にする」) |
+| Claude Code (手元・web) | pre-push が走る | 雛形の `.claude/` を置く。`push-guard.sh` が、フックの入っていない環境からの push、`--no-verify`、API での書き込みを止める |
+| Claude (Actions、`claude-agent.yml`) | ランナーにフックが無く、action 自身の commit ではフックを切る | push させない (トークンの Contents を Read にし、git push も禁止) |
+| Copilot coding agent (クラウド) | フックが走るか確かめていない | 公開リポジトリには割り当てない |
+| ブラウザでの編集、Contents / Git Data API、`gh api`、MCP の GitHub ツール | 走らない | 使わない。エージェントからは `push-guard.sh` が止める |
+| マージボタン (squash のメッセージ)、Dependabot、GITHUB_TOKEN で push するワークフロー | 走らない | 中身は PR の段階で手元から push したもの。メッセージは手で確かめる |
+| PR・Issue の本文とコメント、Release、Gist | push ではない | フックの対象外。書く前に人が確かめる |
+
+`push-guard.sh` と `permissions.deny` は事故を防ぐためのもので、わざと抜けようとするエージェントへの境界ではない
+(たとえばスクリプトに書いてから実行する push は見ていない)。
+
+CI の Secret scan が手元より狭いところ: このマシンのユーザー名とホスト名 (CI ではランナーのものになる)、
+手元にだけ置く非公開リスト (`private-names.sha256`・`private-terms.txt`) は見ない。
+それでも、フックを入れ忘れた環境からの push や、上の表で走らない経路に気付けるので、必須チェックにしておく。
+
+pre-push は、Python が無いと外部資料の名前の検査ができないので push を止める (検査できないまま通さない)。
+
+### 手元にだけ置く一覧 (`~/.config/nox/`)
+
+非公開リポジトリの名前を含む一覧は、公開しているこのリポジトリには置かない。
+
+| ファイル | 中身 | 使うところ |
+|---|---|---|
+| `private-names.sha256` | 外部資料の名前 (ハッシュ) | `check-external-names.py` (`--add-private` で追記) |
+| `private-terms.txt` | 所属組織の文脈を示す語 (平文) | `check-external-names.py` |
+| `org-context-allowed.txt` | 所属組織の文脈を書いてよい非公開リポジトリ (`<owner>/<repo>`、1 行 1 つ)。載せたリポジトリでは上の語の検査だけを外す | `enabled.sh` (場所は `NOX_ORG_CONTEXT_ALLOWED` で変えられる) |
+| `publish-gate.txt` | 非公開リポジトリを経由させる公開リポジトリと経由先 (`<公開> <非公開> <置き場> [<レビュー記録の置き場>]`) | `publish-gate.sh` (場所は `NOX_PUBLISH_GATE`) |
+
+`org-context-allowed.txt` に載せる前に、GitHub でそのリポジトリが private であることを確かめる。
+これらはクラウドのセッションや CI には無い。そのため、クラウドのセッションから `org-context-allowed.txt` に載せた
+リポジトリへ push すると、組織の文脈を示す語の検査で止まることがある (安全側)。
+`publish-gate.sh` は、リポジトリの `git-hooks/publish-gated.txt` (公開リポジトリの名前だけ) に載った公開リポジトリへの push を、
+手元の `publish-gate.txt` に経由先が無い環境では止める。
+
 ### 改行コードと BOM の自動修正 (pre-commit)
 
 `fix-format.py` が、ステージした内容の次の事故をコミットの前に直す。コミットは止めない
@@ -197,6 +241,7 @@ gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無
 | `SECURITY.md` | 脆弱性の報告先 (Private vulnerability reporting)。使っている対策だけ表に残す |
 | `AGENTS.snippet.md` | 各リポジトリの AGENTS.md / CLAUDE.md に写す共通の決まり (AI はマージしない、など) |
 | `.claude/settings.json`、`.claude/hooks/session-start.sh` | Claude Code on the web のセッション開始時に、このリポジトリを clone してフックと gitleaks を入れる |
+| `.claude/hooks/push-guard.sh` (`settings.json` の PreToolUse と `permissions.deny`) | 手元でも web でも、Claude Code の push が pre-push を通らずに外へ出るのを止める (上の「push の前に止める」)。テストは `tests/push-guard.sh` |
 
 リポジトリ固有の除外は、各リポジトリのルートに置く。
 
@@ -217,6 +262,9 @@ gitleaks は Windows なら `winget install Gitleaks.Gitleaks` で入れる (無
 
 1. **Settings → Code security**: Dependabot alerts / security updates、Secret scanning と Push protection、
    Private vulnerability reporting を有効にする (公開リポジトリならすべて無料)。
+   個人アカウント (Free) の非公開リポジトリでは、Push protection・Code scanning (CodeQL)・ルールセットは効かないか使えない
+   (CodeQL のワークフローは失敗する)。非公開のまま始めて後から公開するときは、公開した後にこの手順を行う。
+   非公開の間に走った Actions のログも、公開に切り替えると読めるようになる。
 2. ルールセットを取り込む (上の「取り込むたびに」)。必須チェックには `scan / Scan` と CI のジョブ名を入れる。
 3. MIT などの `LICENSE` を置く (`scan.sh` のライセンス検査は MIT と両立するかを見る)。
 
@@ -325,11 +373,18 @@ PR / Issue のコメントの先頭に `/claude` と書き、空白か改行を�
    - `CLAUDE_CODE_OAUTH_TOKEN` (必須): 手元で `claude setup-token` を実行して得たもの。
      Claude のサブスクリプションの利用枠を使う。
    - `AGENT_APP_ID` / `AGENT_APP_PRIVATE_KEY` (任意): 自前の GitHub App の App ID と秘密鍵。
-     両方あるとその App のトークンで動き、コメントや push がその App の名義になる。無ければ Claude GitHub App で動く。
-     App には Contents / Pull requests / Issues の Read and write を与え、対象のリポジトリにインストールしておく。
-3. Claude GitHub App (自前の App を使わない場合) が対象のリポジトリにインストールされていることを確かめる。
+     両方あるとその App のトークンで動き、コメントがその App の名義になる。
+     無ければ GITHUB_TOKEN で動き、github-actions[bot] の名義になる。
+     App には Contents の Read と、Pull requests / Issues の Read and write を与え、対象のリポジトリにインストールしておく
+     (共通側でもトークンをその権限に絞って発行する)。
 
 反応するのはオーナー・メンバー・共同編集者のコメントだけ (公開リポジトリで他人に利用枠を使われないため)。
+
+Actions の Claude には push させない。ランナーには共通のフックが無く、claude-code-action はセッションの後に
+残った変更を自分で commit / push する (そのときは git のフックを切っている)ため、公開リポジトリでは
+push 前の検査を通らずに公開される。トークンの Contents を Read にし、Claude の `git push` も禁止している。
+Claude GitHub App のトークンは Contents の Write が必ず付くので使わない。
+コードを変えてほしいときは、手元か Claude Code on the web (共通のフックが入る) で頼む。
 
 ### 合図を変える
 

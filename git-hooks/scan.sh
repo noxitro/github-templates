@@ -134,7 +134,7 @@ fi
 
 # --- 4. 外部資料の名前 -------------------------------------------------------
 # 名前はハッシュで持っているので grep では見られない。Python に任せる。
-# 手元に Python が無ければ飛ばす (CI の Secret scan が必ず見る)。
+# Python が無ければここでは飛ばす。pre-push は Python が無いと push を止めるので、公開の前には必ず見る。
 PY=$(sh "$(dirname "$0")/find-python.sh")
 if [ -n "$PY" ]; then
   "$PY" "$(dirname "$0")/check-external-names.py" --blobs < "$TMP/objs.txt" || FOUND=1

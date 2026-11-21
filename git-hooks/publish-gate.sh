@@ -4,7 +4,8 @@
 #
 #   publish-gate.sh <push 先の URL> <local_sha> <remote_sha>
 #
-# push 先が publish-gated.txt に載っていなければ何もしない。載っていれば、push する範囲の
+# push 先が publish-gated.txt (公開リポジトリの名前だけ) にも手元の ~/.config/nox/publish-gate.txt
+# (経由先の非公開リポジトリまで書いたもの) にも載っていなければ何もしない。載っていれば、push する範囲の
 # コミットそれぞれのツリーが、非公開リポジトリの main の履歴に現れた <置き場> のツリーの
 # どれかと一致するかを見る。一致しないコミットが 1 つでもあれば終了コード 1。
 #
@@ -18,8 +19,13 @@ url=$1 local_sha=$2 remote_sha=$3
 
 slug=$(nox_repo_slug "$url")
 [ -n "$slug" ] || exit 0
-line=$(grep -v '^#' "$DIR/publish-gated.txt" 2>/dev/null | awk -v s="$slug" 'tolower($1) == s { print; exit }')
-[ -n "$line" ] || exit 0
+line=$(nox_local_list "${NOX_PUBLISH_GATE:-}" publish-gate.txt | awk -v s="$slug" 'tolower($1) == s { print; exit }')
+if [ -z "$line" ]; then
+  tr -d '\r' < "$DIR/publish-gated.txt" 2>/dev/null | awk -v s="$slug" '!/^#/ && tolower($1) == s { f = 1 } END { exit !f }' || exit 0
+  echo "publish-gate: $slug への push を止めた。経由する非公開リポジトリが手元の publish-gate.txt に無い" >&2
+  echo "  ~/.config/nox/publish-gate.txt に「$slug <非公開リポジトリ> <置き場>」を書いた端末から push する" >&2
+  exit 1
+fi
 # shellcheck disable=SC2086
 set -- $line
 staging=$2 prefix=$3 reviews=${4:-}

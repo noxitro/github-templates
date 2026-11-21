@@ -34,7 +34,7 @@ files_of() {
     workflow-lint) echo ".github/workflows/workflow-lint.yml" ;;
     dependency-review) echo ".github/workflows/dependency-review.yml" ;;
     claude) echo ".github/workflows/claude.yml" ;;
-    session-start) echo ".claude/settings.json .claude/hooks/session-start.sh" ;;
+    session-start) echo ".claude/settings.json .claude/hooks/session-start.sh .claude/hooks/push-guard.sh" ;;
     *) return 1 ;;
   esac
 }
@@ -51,9 +51,9 @@ todo_of() {
     dependency-review)
       echo "- Dependency review: 依存関係グラフ (Settings → Code security) が有効か確かめる" ;;
     claude)
-      echo "- Claude: Settings → Secrets and variables → Actions に \`CLAUDE_CODE_OAUTH_TOKEN\` を登録する (\`claude setup-token\` で得る)。Claude GitHub App がこのリポジトリに入っているかも確かめる。issue_comment で起動するので、既定ブランチに入ってから効く" ;;
+      echo "- Claude: Settings → Secrets and variables → Actions に \`CLAUDE_CODE_OAUTH_TOKEN\` を登録する (\`claude setup-token\` で得る)。Claude は push しない (Contents は Read)。issue_comment で起動するので、既定ブランチに入ってから効く" ;;
     session-start)
-      echo "- session-start: Claude Code on the web のセッションでだけ動く (手元では何もしない)。手元のフックは github-templates の README の手順で入れる" ;;
+      echo "- session-start: SessionStart は Claude Code on the web のセッションでだけ動く (手元では何もしない)。PreToolUse の push-guard は手元でも動き、共通のフックが入っていない端末からの push を止める。手元のフックは github-templates の README の手順で入れる" ;;
   esac
 }
 
@@ -107,10 +107,10 @@ if [ "${1:-}" = "--one" ]; then
           continue
         fi
         if [ "$f" = ".claude/settings.json" ]; then
-          if grep -q 'session-start.sh' "$dst"; then
+          if grep -q 'session-start.sh' "$dst" && grep -q 'push-guard.sh' "$dst"; then
             continue
           fi
-          skipped+=("\`$f\`: 既にほかの設定がある。雛形の SessionStart フックを手で足す")
+          skipped+=("\`$f\`: 既にほかの設定がある。雛形の SessionStart / PreToolUse フックと permissions.deny を手で足す")
           continue
         fi
         if [ "${OVERWRITE:-false}" != "true" ]; then

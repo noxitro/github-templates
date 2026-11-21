@@ -18,12 +18,18 @@ status=0
 # 組織の文脈を書いてよい非公開リポジトリへの push なら、その語の検査だけを外す (enabled.sh)。
 nox_org_context_allowed "${2:-}" && export NOX_ALLOW_ORG_CONTEXT=1
 PY=$(sh "$DIR/find-python.sh")
-[ -n "$PY" ] || echo "pre-push: Python が見つからないので外部資料名の検査を飛ばす" >&2
+# 外部資料の名前と組織の文脈の検査は Python でしか行えない。push の後の CI では公開に間に合わないので、
+# 検査できないまま通さずに止める。
+if [ -z "$PY" ]; then
+  echo "pre-push: Python が見つからないので、外部資料の名前の検査ができない。push を止めた" >&2
+  echo "  Python 3 を入れてから push し直す (find-python.sh が python3 / python / py -3 を探す)" >&2
+  exit 1
+fi
 
 while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue          # ブランチ削除
 
-  # 非公開リポジトリを経由しない公開を止める (publish-gated.txt に載った公開リポジトリだけ)。
+  # 非公開リポジトリを経由しない公開を止める (publish-gated.txt か手元の publish-gate.txt に載った公開リポジトリだけ)。
   sh "$DIR/publish-gate.sh" "${2:-}" "$local_sha" "$remote_sha" || status=1
 
   if [ "$remote_sha" = "$ZERO" ]; then
