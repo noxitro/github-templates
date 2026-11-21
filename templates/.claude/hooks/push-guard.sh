@@ -11,16 +11,17 @@
 #       core.hooksPath が共通のフックを指していること、nox.hooks が false でないことを確かめる
 #       (フックを入れていない新しい端末や、SessionStart が失敗したクラウドのセッションで止まる)。
 #   git send-pack / gh api での contents・git の書き込み : 常に止める (git のフックを通らない)。
+#   gh repo create --push・git subtree push : 内部で git push するので、フックが入った環境かだけを確かめる。
 #   MCP の GitHub ツールのうちファイルやコミットを書くもの (push_files など) : 常に止める。
 #
-# push かどうかは、引用符とヒアドキュメントの中 (コミットメッセージや PR の本文) を除いて、git の後の最初の語
+# push かどうかは、引用符・コメント・ヒアドキュメントの中 (コミットメッセージや PR の本文) を除いて、git の後の最初の語
 # (サブコマンド) で見る。git stash push や git commit -m "... push ..." は push ではない。
 #
 # 事故を防ぐためのもので、わざと抜けようとするエージェントへの境界ではない
 # (スクリプトに書いて実行する push、GraphQL でのコミットなどは見ていない)。
 #
 # 入力は標準入力の JSON (tool_name / tool_input.command / cwd)。止めるときは終了コード 2 と標準エラーの理由。
-# Bash と MCP のすべての呼び出しで走るので、関係しない入力は Python を起動する前に抜ける。
+# Bash・PowerShell・MCP のすべての呼び出しで走るので、関係しない入力は Python を起動する前に抜ける。
 set -uo pipefail
 
 deny() {
@@ -33,21 +34,20 @@ deny() {
 input=$(cat)
 
 case "$input" in
-  *push*|*send-pack*|*'gh api'*|*commit_files*|*create_or_update_file*|*delete_file*|*create_commit*|*update_file*) ;;
+  *push*|*send-pack*|*gh*api*|*commit_files*|*create_or_update_file*|*delete_file*|*create_commit*|*update_file*) ;;
   *) exit 0 ;;
 esac
 
 py=''
-for c in python3 python 'py -3'; do
-  # shellcheck disable=SC2086 # 'py -3' は語に分けて実行する
-  if $c -c 'import json' >/dev/null 2>&1; then py=$c; break; fi
+# pre-push (git-hooks/find-python.sh) と同じものを探す。
+for c in python3 python; do
+  if "$c" -c 'import json' >/dev/null 2>&1; then py=$c; break; fi
 done
 # 読めないのに通さない。ここまで来た入力は push に関係しうる。
 [ -n "$py" ] || deny "Python が無く、入力を読めないので push かどうか判定できない (Python 3 を入れる)。"
 
-# 判定の本体は隣の push-guard.py (引用符の扱いや区切りの分割を sh で書くと誤りやすいため)。
-# shellcheck disable=SC2086 # 'py -3' は語に分けて実行する
-result=$(PUSH_GUARD_INPUT=$input $py "$(dirname "$0")/push-guard.py" 2>&1) || deny "入力を読めなかった: $result"
+# 判定の本体は隣の push-guard.py (引用符の扱いや区切りの分割を sh で書くと誤りやすいため)。入力は標準入力で渡す。
+result=$(printf '%s' "$input" | "$py" "$(dirname "$0")/push-guard.py" 2>&1) || deny "入力を読めなかった: $result"
 verdict=$(printf '%s\n' "$result" | head -1)
 rest=$(printf '%s\n' "$result" | tail -n +2)
 case "$verdict" in

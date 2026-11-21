@@ -22,7 +22,7 @@ PY=$(sh "$DIR/find-python.sh")
 # 検査できないまま通さずに止める。
 if [ -z "$PY" ]; then
   echo "pre-push: Python が見つからないので、外部資料の名前の検査ができない。push を止めた" >&2
-  echo "  Python 3 を入れてから push し直す (find-python.sh が python3 / python / py -3 を探す)" >&2
+  echo "  Python 3 を入れてから push し直す (find-python.sh が python3 / python を探す)" >&2
   exit 1
 fi
 

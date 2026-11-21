@@ -134,7 +134,7 @@ GitHub Secret Protection が要る。いずれにしても、個人メールや�
 | 経路 | push の前の検査 | 扱い |
 |---|---|---|
 | 手元の git (`git push`、内部で git push する `gh pr create` など) | pre-push が走る | 共通のフックを入れておく (下の「手元で有効にする」) |
-| Claude Code (手元・web) | pre-push が走る | 雛形の `.claude/` を置く。`push-guard.sh` が、Bash と PowerShell のツールからの push のうち、フックの入っていない環境からのもの・`--no-verify`・決まった形でないものと、API での書き込みを止める |
+| Claude Code (手元・web) | pre-push が走る | 雛形の `.claude/` を置く。`push-guard.sh` が、Bash と PowerShell のツールからの push のうち、フックの入っていない環境からのもの・`--no-verify`・決まった形でないものと、API での書き込みを止める。内部で git push する `gh repo create --push` と `git subtree push` も、フックの入った環境かを確かめる |
 | Claude (Actions、`claude-agent.yml`) | ランナーにフックが無く、action 自身の commit ではフックを切る | push させない (トークンの Contents を Read にし、git push も禁止) |
 | Copilot coding agent (クラウド) | フックが走るか確かめていない | 公開リポジトリには割り当てない |
 | ブラウザでの編集、Contents / Git Data API、`gh api`、MCP の GitHub ツール | 走らない | 使わない。エージェントからは `push-guard.sh` が止める |
@@ -142,14 +142,22 @@ GitHub Secret Protection が要る。いずれにしても、個人メールや�
 | PR・Issue の本文とコメント、Release、Gist | push ではない | フックの対象外。書く前に人が確かめる |
 
 `push-guard.sh` と `permissions.deny` は事故を防ぐためのもので、わざと抜けようとするエージェントへの境界ではない
-(たとえばスクリプトに書いてから実行する push、git の alias、GraphQL でのコミットは見ていない)。
-`push-guard.sh` は、push は単独の 1 行 (`git push origin <ブランチ>` など) で行うことを求める。
-`git add ... && git commit ... && git push` のようにつなげたものは止めるので、push だけを別に実行する。
-push かどうかは、引用符とヒアドキュメントの中 (コミットメッセージや PR の本文) を除き、コマンドのどこかにある git のサブコマンドで見る (`if ... then git push`、`time git push`、PowerShell の `if ($?) { git push }` も拾う)。そのため、
-`git stash push` や本文に push と書いた `gh pr create` は止めない。
-Bash と MCP のすべての呼び出しで走るが、push などの語を含まない入力は Python を起動せずに抜ける。
-Python が無い環境では、push に関係しうる入力をすべて止める (判定できないまま通さない)。
-`permissions.deny` は core.hooksPath と nox.hooks を書き換える `git config` を止める (読むのは止めない)。
+(たとえばスクリプトに書いてから実行する push、git の alias、変数に入れてから `eval` するコマンド、GraphQL でのコミットは見ていない)。
+
+- **push の形**: 単独の 1 行の `git push` で、オプションは `-u` / `--set-upstream` / `--force-with-lease[=<ref>]` / `--delete` / `-d` /
+  `--tags` / `--follow-tags` だけ (ブランチとの順番は問わない。`git push origin --delete work/old` も通る)。
+  `git add ... && git commit ... && git push` のようにつなげたもの、コメントを付けたもの、`2>/dev/null` などは止めるので、push だけを別に実行する。
+- **push かどうかの見分け方**: 引用符・コメント・ヒアドキュメントの中 (コミットメッセージや PR の本文) を除き、コマンドのどこかにある
+  git のサブコマンドで見る (`if ... then git push`、`time git push`、PowerShell の `if ($?) { git push }` も拾う)。
+  そのため、`git stash push` や本文に push と書いた `gh pr create` は止めない。
+  シェルに渡して実行するもの (`bash -c "..."`、`bash <<EOF`、`eval "..."`、`"$(...)"`) は中身もコマンドとして読む。
+  終わりの行が見つからないヒアドキュメントは、本文とみなさずに読む。PowerShell では `` ` `` を打ち消しの文字として扱う (`\` は普通の文字)。
+- **MCP**: `push_files` / `create_or_update_file` / `create_commit` / `commit_files` はどのサーバーのものでも止める。
+  ほかのサーバーにもある名前の `delete_file` / `update_file` は、サーバー名に `github` を含むときだけ止める
+  (サーバー名が ID になっている GitHub の接続では、この 2 つは止まらない)。
+- Bash・PowerShell・MCP のすべての呼び出しで走るが、push などの語を含まない入力は Python を起動せずに抜ける。
+- Python (`python3` か `python`。pre-push と同じ) が無い環境では、push に関係しうる入力をすべて止める (判定できないまま通さない)。
+- `permissions.deny` は core.hooksPath と nox.hooks を書き換える `git config` (`--unset` を含む) を止める (読むのは止めない)。
 
 CI の Secret scan が手元より狭いところ: このマシンのユーザー名とホスト名 (CI ではランナーのものになる)、
 手元にだけ置く非公開リスト (`private-names.sha256`・`private-terms.txt`) は見ない。

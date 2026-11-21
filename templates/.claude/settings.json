@@ -5,10 +5,12 @@
       "Bash(git config *core.hookspath *)",
       "Bash(git config *nox.hooks *)",
       "Bash(git config --unset*hooks*)",
+      "Bash(git config *--unset*hooks*)",
       "PowerShell(git config *core.hooksPath *)",
       "PowerShell(git config *core.hookspath *)",
       "PowerShell(git config *nox.hooks *)",
-      "PowerShell(git config --unset*hooks*)"
+      "PowerShell(git config --unset*hooks*)",
+      "PowerShell(git config *--unset*hooks*)"
     ]
   },
   "hooks": {

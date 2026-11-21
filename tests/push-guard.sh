@@ -50,6 +50,34 @@ for c in "git push --no-verify origin x" "git push --no-verif origin x" "git pus
          "echo x | xargs git push --no-verify" "/usr/bin/git push --no-verify origin x"; do
   run deny Bash "$c"
 done
+# 複数行・コメント・ヒアドキュメントの見かけで、後ろの push を見落とさない
+for c in "$(printf 'git commit -F - <<< "wip"\ngit push --no-verify origin main')" \
+         "$(printf 'echo $((1 << n))\ngit push --no-verify')" \
+         "$(printf 'git commit -m "fix <<EOF handling"\ngit push --no-verify')" \
+         "$(printf 'cat <<EOF-X\nbody\nEOF-X\ngit push --no-verify')" \
+         "$(printf "cat <<'EOF'\nbody\nEOF\ngit push --no-verify")" \
+         "$(printf "# Don't push tags\ngit push --no-verify origin main\n# that's it")" \
+         "$(printf 'bash <<EOF\ngit push --no-verify\nEOF')" \
+         'bash -c "git push --no-verify"' "sh -lc 'git push --no-verify origin x'" \
+         'eval "git push --no-verify"' 'echo "$(git push --no-verify)"' \
+         'git -c "user.name=A B" push origin x' \
+         "git push origin x # done" \
+         "git -c core.hooksPath=/dev/null subtree push --prefix=x origin main"; do
+  run deny Bash "$c"
+done
+run deny PowerShell 'Set-Location "E:\repo\"; git push --no-verify origin main; Write-Host "done"'
+run deny PowerShell "$(printf 'Write-Host "a"\n<# note #> git push --no-verify')"
+run deny PowerShell 'pwsh -NoProfile -Command "git push --no-verify"'
+run deny PowerShell 'git commit -m "say `"hi`""; git push --no-verify'
+run allow PowerShell "$(printf "\$m = @'\nrun git push --no-verify later\n'@\ngit commit -m \$m")"
+# 内部で git push するもの: フックが入っていれば通す (入っていないときは下の実効の設定の試験で止まる)
+run allow Bash "gh repo create foo --public --source=. --push"
+run allow Bash "git subtree push --prefix=x origin main"
+run allow Bash "git subtree --prefix=x push origin main"
+# 順番が違うだけの決まった形
+run allow Bash "git push origin --delete work/old"
+run allow Bash "git push origin work/x --force-with-lease"
+run allow Bash "git push --follow-tags origin main"
 run allow Bash 'git push origin "work/x"'
 run allow Bash "git push 'origin' x"
 run allow Bash "git push origin work/x 2>&1"
@@ -81,9 +109,13 @@ run allow Read ""
 run deny mcp__github__push_files ""
 run deny mcp__github__create_or_update_file ""
 run allow mcp__github__get_file_contents ""
+run deny mcp__github__delete_file ""
+run allow mcp__filesystem__delete_file ""
+run allow mcp__drive__update_file ""
 
 # 実効の設定で止まること
 git -C "$T" config core.hooksPath "$T/nowhere"; run deny Bash "git push origin x"
+run deny Bash "gh repo create foo --public --source=. --push"; run deny Bash "git subtree push --prefix=x origin main"
 git -C "$T" config --unset core.hooksPath; GIT_CONFIG_GLOBAL=/dev/null run deny Bash "git push origin x"
 git -C "$T" config core.hooksPath "$HOOKS"
 git -C "$T" config nox.hooks false; run deny Bash "git push origin x"; git -C "$T" config --unset nox.hooks
@@ -96,10 +128,10 @@ git -C "$T" config nox.hooks false; run deny Bash "git push origin x"; git -C "$
 ) || fails=$((fails + 1))
 
 # Python が使えない環境では、push に関係しうる入力を止める (読めないのに通さない)。
-# 失敗するだけの python3 / python / py を PATH の先頭に置いて試す。
+# 失敗するだけの python3 / python を PATH の先頭に置いて試す。
 NOPY="$T/nopy"
 mkdir -p "$NOPY"
-for t in python3 python py; do printf '#!/bin/sh\nexit 1\n' > "$NOPY/$t"; chmod +x "$NOPY/$t"; done
+for t in python3 python; do printf '#!/bin/sh\nexit 1\n' > "$NOPY/$t"; chmod +x "$NOPY/$t"; done
 nopy() {
   exp=$1 json=$2
   printf '%s' "$json" | PATH="$NOPY:$PATH" bash "$G" >/dev/null 2>&1; rc=$?
