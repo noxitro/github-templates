@@ -10,7 +10,7 @@
 #       ほかのコマンドとの組み合わせ (&&・;・| など) は止める。そのうえで、このリポジトリの実効の
 #       core.hooksPath が共通のフックを指していること、nox.hooks が false でないことを確かめる
 #       (フックを入れていない新しい端末や、SessionStart が失敗したクラウドのセッションで止まる)。
-#   git send-pack / gh api での contents・git の書き込み : 常に止める (git のフックを通らない)。
+#   git send-pack / git lfs push / gh api での contents・git の書き込み : 常に止める (git のフックを通らない)。
 #   gh repo create --push・git subtree push : 内部で git push するので、フックが入った環境かだけを確かめる。
 #   MCP の GitHub ツールのうちファイルやコミットを書くもの (push_files など) : 常に止める。
 #
@@ -41,7 +41,7 @@ esac
 py=''
 # pre-push (git-hooks/find-python.sh) と同じものを探す。
 for c in python3 python; do
-  if "$c" -c 'import json' >/dev/null 2>&1; then py=$c; break; fi
+  if "$c" -c 'import sys; sys.exit(sys.version_info[0] != 3)' >/dev/null 2>&1; then py=$c; break; fi
 done
 # 読めないのに通さない。ここまで来た入力は push に関係しうる。
 [ -n "$py" ] || deny "Python が無く、入力を読めないので push かどうか判定できない (Python 3 を入れる)。"

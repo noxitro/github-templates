@@ -147,10 +147,14 @@ GitHub Secret Protection が要る。いずれにしても、個人メールや�
 - **push の形**: 単独の 1 行の `git push` で、オプションは `-u` / `--set-upstream` / `--force-with-lease[=<ref>]` / `--delete` / `-d` /
   `--tags` / `--follow-tags` だけ (ブランチとの順番は問わない。`git push origin --delete work/old` も通る)。
   `git add ... && git commit ... && git push` のようにつなげたもの、コメントを付けたもの、`2>/dev/null` などは止めるので、push だけを別に実行する。
+  `--force` / `-f` と、同じ意味になる `+` で始まる refspec (`git push origin +main`) も止める。
+- **常に止めるもの**: `git send-pack`、`git lfs push`、`gh api` での contents / git への書き込み。
+  `gh api` は宛先 (`/contents/` か `/git/` を含むか) とメソッドで見る。`-X GET` と明示した読み取りや、
+  本文・ほかのコマンドに同じ文字列が出てくるだけのものは止めない。
 - **push かどうかの見分け方**: 引用符・コメント・ヒアドキュメントの中 (コミットメッセージや PR の本文) を除き、コマンドのどこかにある
   git のサブコマンドで見る (`if ... then git push`、`time git push`、PowerShell の `if ($?) { git push }` も拾う)。
   そのため、`git stash push` や本文に push と書いた `gh pr create` は止めない。
-  シェルに渡して実行するもの (`bash -c "..."`、`bash <<EOF`、`eval "..."`) は中身もコマンドとして読む。
+  シェルに渡して実行するもの (`bash -c "..."`、`bash <<EOF`、`cat <<EOF | bash`、`eval "..."`) は中身もコマンドとして読む。
   二重引用符の中は、コマンド置換 (`$(...)` と `` `...` ``) の中だけをコマンドとして読み、地の文はメッセージとして扱う
   (`git commit -m "$(cat <<'EOF' ... EOF)"` の本文に push や `"` があっても止めない)。
   終わりの行が見つからないヒアドキュメントは、本文とみなさずに読む。PowerShell では `` ` `` を打ち消しの文字として扱う (`\` は普通の文字)。
@@ -309,9 +313,10 @@ OWNER=noxitro REPOS=all SETS=secret-scan,file-format bash scripts/apply-template
 | `workflow-lint` | `.github/workflows/workflow-lint.yml` |
 | `dependency-review` | `.github/workflows/dependency-review.yml` (非公開リポジトリには入れない) |
 | `claude` | `.github/workflows/claude.yml` |
-| `session-start` | `.claude/settings.json`、`.claude/hooks/session-start.sh` |
+| `session-start` | `.claude/settings.json`、`.claude/hooks/session-start.sh`、`.claude/hooks/push-guard.sh`、`.claude/hooks/push-guard.py` |
 
 - 既にあって中身が違うファイルは上書きしない (`OVERWRITE=true` で上書き。`.claude/settings.json` は除く)。
+  `.claude/settings.json` は、以前の雛形そのままのときだけ新しい雛形に置き換える (ほかの設定が入っていれば、手で足すよう PR の本文に残す)。
   `.gitignore` で外しているパスにも入れない。どちらも PR の本文に残す。
 - PR のブランチは `templates/apply`。流し直すと、開いている PR の中身が置き換わる。マージは人が行う。
 - `SECURITY.md`・PR テンプレート・`dependabot.yml`・`.editorconfig` はリポジトリごとに中身を直すので配らない。

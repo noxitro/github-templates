@@ -12,6 +12,7 @@
 #              secret-scan / file-format / workflow-lint / dependency-review / claude / session-start
 #   OVERWRITE  true なら、雛形と中身の違う既存ファイルも上書きする。
 #              .claude/settings.json はほかの設定も入るファイルなので、true でも上書きしない
+#              (以前の雛形そのままのときだけ、この指定に関わらず新しい雛形に置き換える)
 #   DRY_RUN    1 なら push も PR もしない
 #
 # SECURITY.md・PR テンプレート・dependabot.yml はリポジトリごとに中身を直すものなので、ここでは配らない。
@@ -24,6 +25,9 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 src="$root/templates"
 branch=templates/apply
 self=github-templates
+# 以前の雛形の .claude/settings.json (CR を除いた内容の sha256、1 行 1 つ)。これと同じ中身なら新しい雛形に置き換える。
+# 雛形の settings.json を変えるときは、変える前のものをここに足す。
+old_settings_shas="5dfecbd0df59e920584087b635cabb0e9796797900f017fd9fe4c9bd24e15722"
 # git の資格情報は gh のログインから取る (gh auth setup-git をしていない環境でも push できるように)
 git_gh() { git -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"; }
 
@@ -110,10 +114,14 @@ if [ "${1:-}" = "--one" ]; then
           if grep -q 'session-start.sh' "$dst" && grep -q 'push-guard.sh' "$dst"; then
             continue
           fi
-          skipped+=("\`$f\`: 既にほかの設定がある。雛形の SessionStart / PreToolUse フックと permissions.deny を手で足す")
-          continue
-        fi
-        if [ "${OVERWRITE:-false}" != "true" ]; then
+          # 以前の雛形そのままなら、リポジトリ固有の設定は無いので新しい雛形に置き換える
+          # (置き換えないと、push-guard のファイルだけが入って設定が付かない)。
+          sum=$(tr -d '\r' <"$dst" | sha256sum 2>/dev/null | cut -d' ' -f1) || sum=''
+          if ! grep -qxF "$sum" <<<"$old_settings_shas"; then
+            skipped+=("\`$f\`: 既にほかの設定がある。雛形の SessionStart / PreToolUse フックと permissions.deny を手で足す")
+            continue
+          fi
+        elif [ "${OVERWRITE:-false}" != "true" ]; then
           skipped+=("\`$f\`: 雛形と中身が違う (リポジトリ固有の変更かもしれないので上書きしない)")
           continue
         fi

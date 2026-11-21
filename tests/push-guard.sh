@@ -128,6 +128,31 @@ run deny mcp__github__delete_file ""
 run allow mcp__filesystem__delete_file ""
 run allow mcp__drive__update_file ""
 
+# + で始まる refspec は --force と同じ。git lfs push と、シェルへパイプしたヒアドキュメントの中の push も止める
+run deny Bash "git push origin +main"
+run deny Bash "git push origin +HEAD:main"
+run allow Bash "git push origin HEAD:refs/heads/work/x"
+run deny Bash "git lfs push origin main"
+run allow Bash "git lfs pull"
+run deny Bash "$(printf 'cat <<EOF | bash\ngit push --no-verify\nEOF')"
+run deny Bash "$(printf 'cat <<EOF | sudo cat | sh -s\ngit push --no-verify\nEOF')"
+run allow Bash "$(printf 'cat <<EOF | tee notes.md\nrun git push --no-verify\nEOF')"
+# gh api: 宛先とメソッドで見る。読み取りと、本文やほかのコマンドに出てくるだけのものは止めない
+for c in 'gh api repos/{owner}/{repo}/contents/a.txt -X PUT --input f.json' \
+         "gh api --method=put repos/o/r/contents/a.txt -f message=m" "gh api -XDELETE repos/o/r/contents/a.txt" \
+         "gh api -H 'Accept: application/vnd.github+json' repos/o/r/git/blobs --input -" \
+         'bash -c "gh api -X PUT repos/o/r/contents/a.txt -f message=m"' \
+         'x=$(gh api repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc)'; do
+  run deny Bash "$c"
+done
+for c in "gh api repos/o/r/contents/README.md -f ref=main -X GET" \
+         'gh api repos/o/r/commits/main/check-runs --jq .total_count && grep -F "/git/" x -f pats' \
+         'gh pr comment 1 --body "gh api -X PUT repos/o/r/contents/a.txt is blocked"' \
+         "gh api repos/o/r/issues/1/comments -f body=see/git/docs" \
+         'gh api "repos/o/r/contents/a.txt?ref=x" --jq .content'; do
+  run allow Bash "$c"
+done
+
 # 実効の設定で止まること
 git -C "$T" config core.hooksPath "$T/nowhere"; run deny Bash "git push origin x"
 run deny Bash "gh repo create foo --public --source=. --push"; run deny Bash "git subtree push --prefix=x origin main"

@@ -31,11 +31,6 @@ if tool not in ("Bash", "PowerShell"):
     out("allow")
 ps = tool == "PowerShell"
 
-# gh api でのファイル・コミットの書き込み (git のフックを通らない)。
-if (re.search(r"(^|[^\w-])gh\s+api(\s|$)", cmd) and re.search(r"/(contents|git)/", cmd)
-        and re.search(r"(-X|--method)[\s=]*(PUT|POST|PATCH|DELETE)|(^|\s)(-f|-F|--field|--raw-field|--input)([\s=]|$)", cmd)):
-    out("deny", "gh api でのファイル・コミットの書き込みは pre-push を通らない。")
-
 
 def base(word):
     return re.split(r"[\\/]", word)[-1].lower()
@@ -187,7 +182,11 @@ def lex(text, i=0, stop=False):
                 delim = re.sub(r"""['"\\]""", "", m.group(0))
                 words = words_here()
                 to_shell = bool(words) and (is_shell(words[-1]) or (len(words) > 1 and is_shell(words[-2]) and words[-1] == "-s"))
-                if delim and not to_shell:
+                # cat <<EOF | bash のように、同じ行でシェルへパイプしているものも本文をコマンドとして読む。
+                eol = text.find("\n", j + m.end())
+                tail = text[j + m.end():n if eol < 0 else eol]
+                piped = any(p.split() and is_shell(p.split()[0]) for p in tail.split("|")[1:])
+                if delim and not to_shell and not piped:
                     pending.append((delim, tabs))
                 buf.append(" <<H ")
                 i = j + m.end()
@@ -229,6 +228,42 @@ def lex(text, i=0, stop=False):
 
 plain = lex(cmd)[0]
 
+# gh api でのファイル・コミットの書き込み (git のフックを通らない)。引用符の中 (本文) は lex が落としている。
+# 見るのは宛先 (最初の、オプションでもその値でもない語) で、-X GET と明示した読み取りは通す。
+# 宛先には {owner}/{repo} と書けるので、{ } では区切らない。
+GH_API_WITH_ARG = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input", "-H", "--header",
+                   "-q", "--jq", "-t", "--template", "--hostname", "--cache", "-p", "--preview"}
+
+
+def gh_api_writes(args):
+    endpoint, method, fields, n = "", "", False, 0
+    while n < len(args):
+        a = args[n]
+        if a in ("-X", "--method"):
+            method = args[n + 1] if n + 1 < len(args) else ""
+        elif a.startswith("--method="):
+            method = a[len("--method="):]
+        elif a.startswith("-X") and len(a) > 2:
+            method = a[2:].lstrip("=")
+        if a.startswith(("-f", "-F", "--field", "--raw-field", "--input")):
+            fields = True
+        if a in GH_API_WITH_ARG:
+            n += 2
+            continue
+        if not a.startswith("-") and not endpoint:
+            endpoint = a
+        n += 1
+    if not re.search(r"/(contents|git)/", endpoint):
+        return False
+    return method.upper() != "GET" if method else fields
+
+
+for seg in re.split(r"[;&|()\n`]|\$\(", plain):
+    words = seg.split()
+    for k, w in enumerate(words):
+        if base(w) in ("gh", "gh.exe") and words[k + 1:k + 2] == ["api"] and gh_api_writes(words[k + 2:]):
+            out("deny", "gh api でのファイル・コミットの書き込みは pre-push を通らない。")
+
 # コマンドの区切りで分け、区切りの中のどこかに git があれば、その後ろのサブコマンドを見る
 # (if ... then git push、time git push、PowerShell の if ($?) { git push } なども拾う)。
 GLOBAL_WITH_ARG = {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path"}
@@ -248,6 +283,8 @@ for seg in re.split(SEP, plain):
         sub = words[i] if i < len(words) else ""
         if sub == "send-pack":
             out("deny", "git send-pack は pre-push を通らない。")
+        if sub == "lfs" and words[i + 1:i + 2] == ["push"]:
+            out("deny", "git lfs push は pre-push を通らない (LFS のオブジェクトは git push のときに一緒に送られる)。")
         if sub == "push":
             pushing = True
         if sub == "subtree" and "push" in words[i + 1:]:
@@ -261,7 +298,8 @@ if pushing:
     # オプションは下のものだけで、ブランチとの順番は問わない (ブランチ名は - で始まらない)。
     one = re.sub(r'"([^"\s]*)"|\'([^\'\s]*)\'', lambda m: m.group(1) if m.group(1) is not None else m.group(2), cmd.strip())
     one = re.sub(r"[ \t]+", " ", one)
-    ref = r"[A-Za-z0-9._/:+@^~{}][A-Za-z0-9._/:+@^~{}-]*"
+    # + で始まる refspec (+main) は --force と同じなので、先頭の文字には入れない。
+    ref = r"[A-Za-z0-9._/:@^~{}][A-Za-z0-9._/:+@^~{}-]*"
     opt = rf"-u|--set-upstream|--force-with-lease(?:={ref})?|--delete|-d|--tags|--follow-tags"
     form = rf"git push(?: (?:{opt}|{ref}))*(?: 2>&1)?"
     if "\n" in one or not re.fullmatch(form, one):
