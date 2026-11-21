@@ -150,7 +150,9 @@ GitHub Secret Protection が要る。いずれにしても、個人メールや�
 - **push かどうかの見分け方**: 引用符・コメント・ヒアドキュメントの中 (コミットメッセージや PR の本文) を除き、コマンドのどこかにある
   git のサブコマンドで見る (`if ... then git push`、`time git push`、PowerShell の `if ($?) { git push }` も拾う)。
   そのため、`git stash push` や本文に push と書いた `gh pr create` は止めない。
-  シェルに渡して実行するもの (`bash -c "..."`、`bash <<EOF`、`eval "..."`、`"$(...)"`) は中身もコマンドとして読む。
+  シェルに渡して実行するもの (`bash -c "..."`、`bash <<EOF`、`eval "..."`) は中身もコマンドとして読む。
+  二重引用符の中は、コマンド置換 (`$(...)` と `` `...` ``) の中だけをコマンドとして読み、地の文はメッセージとして扱う
+  (`git commit -m "$(cat <<'EOF' ... EOF)"` の本文に push や `"` があっても止めない)。
   終わりの行が見つからないヒアドキュメントは、本文とみなさずに読む。PowerShell では `` ` `` を打ち消しの文字として扱う (`\` は普通の文字)。
 - **MCP**: `push_files` / `create_or_update_file` / `create_commit` / `commit_files` はどのサーバーのものでも止める。
   ほかのサーバーにもある名前の `delete_file` / `update_file` は、サーバー名に `github` を含むときだけ止める

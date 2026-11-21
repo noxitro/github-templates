@@ -52,11 +52,8 @@ def is_shell(word):
 
 
 SEP = r"[;&|(){}\n`!]|\$\("
-
-
-def seg_words(buf):
-    # 組み立て中の出力の、いまの区切りの語。
-    return re.split(SEP, "".join(buf))[-1].split()
+ESC = "`" if ps else "\\"
+COMMENT_AFTER = ("", " ", "\t", "\n", ";", "&", "|", "(", ")")
 
 
 def skip_bodies(text, i, pending):
@@ -75,27 +72,70 @@ def skip_bodies(text, i, pending):
     return i
 
 
-def flatten(text):
-    # 実行されない部分 (引用符の中の文、コメント、ヒアドキュメントの本文) を落とし、コマンドの語だけを残す。
-    # 引用符の中は、空白を含むもの (メッセージや本文) を 1 語の印 Q に、含まないものは外す ("git" -> git)。
-    # ただし、シェルに渡して実行するもの (bash -c "..."、bash <<EOF、"$(...)" など) は中身もコマンドとして読む。
-    esc = "`" if ps else "\\"
-    buf, pending = [], []
-    i, n, arith = 0, len(text), 0
+def lex(text, i=0, stop=False):
+    """実行されない部分 (引用符の中の文、コメント、ヒアドキュメントの本文) を落とし、コマンドの語だけを残す。
 
-    def emit(body, double):
-        words = seg_words(buf)
+    引用符の中は、空白を含むもの (メッセージや本文) を 1 語の印 Q に、含まないものは外す ("git" -> git)。
+    引用符の中のコマンド置換 ("$(...)"、"`...`") と、シェルに渡して実行するもの (bash -c "..."、eval "...") は、
+    中身をコマンドとして読み、末尾に別の行として足す (元の位置には Q を置くので、git と push の間は崩れない)。
+    stop が真なら、対応する ) まで読んで (結果, ) の次の位置) を返す。
+    """
+    buf, side, pending = [], [], []
+    n, arith, depth = len(text), 0, 0
+
+    def words_here():
+        # 組み立て中の出力の、いまの区切りの語 (直前の部分だけを見る)。
+        return re.split(SEP, "".join(buf[-200:]))[-1].split()
+
+    def emit(raw, literal, code):
+        words = words_here()
         prev = words[-1].lower() if words else ""
         runs = (prev in ("eval", "invoke-expression", "iex")
                 or (re.fullmatch(r"-[a-z]*c|/c|/k|-command", prev) and any(is_shell(w) for w in words[:-1])))
-        if runs or (double and ("$(" in body or (not ps and "`" in body))):
-            buf.append(" ; " + flatten(body) + " ; ")
-        elif is_git(body):
+        if runs:
+            side.append(lex(raw)[0])
+            buf.append("Q")
+            return
+        side.extend(code)
+        if is_git(literal) and not code:
             buf.append("git")
-        elif body == "" or re.search(r"\s", body):
+        elif literal == "" or code or re.search(r"\s", literal):
             buf.append("Q")
         else:
-            buf.append(body)
+            buf.append(literal)
+
+    def dquote(j):
+        # j は開きの " の次。閉じの " の次の位置と、(中身そのまま, 地の文, 置換の中身) を返す。閉じが無ければ None。
+        lit, code, start = [], [], j
+        while j < n:
+            ch = text[j]
+            if ch == ESC:
+                lit.append(text[j + 1:j + 2])
+                j += 2
+                continue
+            if ch == '"':
+                if ps and text[j + 1:j + 2] == '"':
+                    lit.append('"')
+                    j += 2
+                    continue
+                return j + 1, text[start:j], "".join(lit), code
+            if text.startswith("$(", j) and not text.startswith("$((", j):
+                inner, j = lex(text, j + 2, True)
+                code.append(inner)
+                continue
+            if not ps and ch == "`":
+                e = j + 1
+                while e < n and text[e] != "`":
+                    e += 2 if text[e] == "\\" else 1
+                code.append(lex(text[j + 1:e])[0])
+                j = e + 1
+                continue
+            lit.append(ch)
+            j += 1
+        return None
+
+    def done(at):
+        return "".join(buf) + "".join("\n" + s + "\n" for s in side), at
 
     while i < n:
         c = text[i]
@@ -106,7 +146,7 @@ def flatten(text):
                 i = skip_bodies(text, i, pending)
                 pending = []
             continue
-        if c == esc and i + 1 < n:
+        if c == ESC and i + 1 < n:
             buf.append(" " if text[i + 1] == "\n" else text[i + 1])
             i += 2
             continue
@@ -115,7 +155,7 @@ def flatten(text):
             i = n if j < 0 else j + 2
             buf.append(" ")
             continue
-        if c == "#" and (not buf or buf[-1][-1:] in ("", " ", "\t", "\n", ";", "&", "|", "(", ")", "{", "}")):
+        if c == "#" and (not buf or buf[-1][-1:] in COMMENT_AFTER):
             j = text.find("\n", i)
             i = n if j < 0 else j
             continue
@@ -129,6 +169,12 @@ def flatten(text):
             buf.append("))")
             i += 2
             continue
+        if stop and c == "(":
+            depth += 1
+        if stop and c == ")":
+            if depth == 0:
+                return done(i + 1)
+            depth -= 1
         if (not ps and not arith and text.startswith("<<", i) and not text.startswith("<<<", i)
                 and not (buf and buf[-1].endswith("<"))):
             j = i + 2
@@ -139,7 +185,7 @@ def flatten(text):
             m = re.match(r"""(?:[^\s;&|()<>'"\\]|'[^'\n]*'|"[^"\n]*"|\\.)+""", text[j:])
             if m:
                 delim = re.sub(r"""['"\\]""", "", m.group(0))
-                words = seg_words(buf)
+                words = words_here()
                 to_shell = bool(words) and (is_shell(words[-1]) or (len(words) > 1 and is_shell(words[-2]) and words[-1] == "-s"))
                 if delim and not to_shell:
                     pending.append((delim, tabs))
@@ -150,43 +196,38 @@ def flatten(text):
             q = text[i + 1]
             j = text.find("\n" + q + "@", i + 2)
             if j >= 0:
-                emit(text[i + 2:j], q == '"')
+                body = text[i + 2:j]
+                emit(body, body, [lex(body)[0]] if q == '"' and "$(" in body else [])
                 i = j + 3
+                continue
+        if not ps and c == "$" and text[i + 1:i + 2] == "'":
+            j = i + 2
+            while j < n and text[j] != "'":
+                j += 2 if text[j] == "\\" else 1
+            if j < n:
+                body = text[i + 2:j]
+                emit(body, body, [])
+                i = j + 1
                 continue
         if c == "'":
             j = text.find("'", i + 1)
-            if j < 0:
-                buf.append(c)
-                i += 1
+            if j >= 0:
+                body = text[i + 1:j]
+                emit(body, body, [])
+                i = j + 1
                 continue
-            emit(text[i + 1:j], False)
-            i = j + 1
-            continue
         if c == '"':
-            j = i + 1
-            while j < n:
-                if text[j] == esc:
-                    j += 2
-                    continue
-                if text[j] == '"':
-                    if ps and text[j + 1:j + 2] == '"':
-                        j += 2
-                        continue
-                    break
-                j += 1
-            if j >= n:
-                buf.append(c)
-                i += 1
+            r = dquote(i + 1)
+            if r:
+                i, raw, literal, code = r
+                emit(raw, literal, code)
                 continue
-            emit(text[i + 1:j], True)
-            i = j + 1
-            continue
         buf.append(c)
         i += 1
-    return "".join(buf)
+    return done(n)
 
 
-plain = flatten(cmd)
+plain = lex(cmd)[0]
 
 # コマンドの区切りで分け、区切りの中のどこかに git があれば、その後ろのサブコマンドを見る
 # (if ... then git push、time git push、PowerShell の if ($?) { git push } なども拾う)。

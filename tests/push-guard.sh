@@ -65,6 +65,21 @@ for c in "$(printf 'git commit -F - <<< "wip"\ngit push --no-verify origin main'
          "git -c core.hooksPath=/dev/null subtree push --prefix=x origin main"; do
   run deny Bash "$c"
 done
+for c in 'n=${#files[@]}; git push --no-verify' 'echo ${#s} && git push --no-verify origin main' \
+         'echo ${x}#y; git push --no-verify' "x=\$'it\\'s'; git push --no-verify; echo 'a'" \
+         "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nHandle 5" screens\nEOF\n)" && git push --no-verify -u origin "$(git branch --show-current)"')" \
+         "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nHandle 5" screens\nEOF\n)"; git push --no-verify; echo "done"')" \
+         'git -c "$(echo core.hooksPath=/dev/null)" push origin x'; do
+  run deny Bash "$c"
+done
+# コミットメッセージや PR の本文によく使う形 (本文に git push や " があっても止めない)
+for c in "$(printf 'gh pr create --title "x" --body "$(cat <<'"'"'EOF'"'"'\n## Summary\n- git push is guarded\n- say "hi"\nEOF\n)"')" \
+         "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\ndocs: describe git push flow\n\nRename "foo"\nEOF\n)"')" \
+         'git commit -m "wip $(date +%F) before git push"' 'gh pr comment 3 --body "ran \`git push\` again"' \
+         'echo "total: $(wc -l < f) lines; next: git push"'; do
+  run allow Bash "$c"
+done
+run allow PowerShell 'git commit -m "wip: before git push ($(Get-Date -Format yyyy-MM-dd))"'
 run deny PowerShell 'Set-Location "E:\repo\"; git push --no-verify origin main; Write-Host "done"'
 run deny PowerShell "$(printf 'Write-Host "a"\n<# note #> git push --no-verify')"
 run deny PowerShell 'pwsh -NoProfile -Command "git push --no-verify"'
