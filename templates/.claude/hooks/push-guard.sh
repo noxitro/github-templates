@@ -4,97 +4,67 @@
 # 公開リポジトリでは push した時点で公開される。push の後の CI (Secret scan) では間に合わないので、
 # pre-push が確実に走る形の push だけを通す。
 #
-#   Bash の git push   : 決まった形 (git push [-u] [--force-with-lease] [--delete] [--tags] [origin] [<ref>...])
-#                        だけを通す。--no-verify (省略形を含む)、git と push の間のオプション (-c / -C など)、
-#                        環境変数の代入、cd との組み合わせは止める。そのうえで、このリポジトリの実効の
-#                        core.hooksPath が共通のフックを指していること、nox.hooks が false でないことを確かめる
-#                        (フックを入れていない新しい端末や、SessionStart が失敗したクラウドのセッションで止まる)。
-#   Bash の git send-pack / gh api による contents・git の書き込み : 常に止める (git のフックを通らない)。
-#   MCP の GitHub ツールのうちファイルを書くもの (push_files / create_or_update_file など) : 常に止める。
+#   Bash / PowerShell の git push : 単独の 1 行で、決まった形
+#       (git push [-u] [--force-with-lease] [--delete] [--tags] [origin] [<ref>...]) のものだけを通す。
+#       --no-verify (省略形を含む)、git と push の間のオプション (-c / -C など)、環境変数の代入、
+#       ほかのコマンドとの組み合わせ (&&・;・| など) は止める。そのうえで、このリポジトリの実効の
+#       core.hooksPath が共通のフックを指していること、nox.hooks が false でないことを確かめる
+#       (フックを入れていない新しい端末や、SessionStart が失敗したクラウドのセッションで止まる)。
+#   git send-pack / gh api での contents・git の書き込み : 常に止める (git のフックを通らない)。
+#   MCP の GitHub ツールのうちファイルやコミットを書くもの (push_files など) : 常に止める。
+#
+# push かどうかは、引用符の中 (コミットメッセージや PR の本文) を除いて、git の後の最初の語
+# (サブコマンド) で見る。git stash push や git commit -m "... push ..." は push ではない。
 #
 # 事故を防ぐためのもので、わざと抜けようとするエージェントへの境界ではない
-# (スクリプトに書いて実行する、などは見ていない)。
+# (スクリプトに書いて実行する push、GraphQL でのコミットなどは見ていない)。
 #
-# 入力は標準入力の JSON (tool_name / tool_input / cwd)。止めるときは終了コード 2 と標準エラーの理由。
+# 入力は標準入力の JSON (tool_name / tool_input.command / cwd)。止めるときは終了コード 2 と標準エラーの理由。
+# Bash と MCP のすべての呼び出しで走るので、関係しない入力は Python を起動する前に抜ける。
 set -uo pipefail
 
 deny() {
   echo "push-guard: $1" >&2
-  echo "  push は共通の pre-push を通る形 (git push origin <ブランチ>) で行う。フックの導入は github-templates の README。" >&2
+  echo "  push は、単独の 1 行の git push origin <ブランチ> で行う (共通の pre-push を通る形)。" >&2
+  echo "  フックが入っていないと言われたら、自分で設定を変えずにユーザーに導入を頼む (github-templates の README)。" >&2
   exit 2
 }
 
 input=$(cat)
 
-py=''
-for c in python3 python; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import json' >/dev/null 2>&1; then py=$c; break; fi
-done
-
-field() {
-  # $1: tool_name / command / cwd
-  printf '%s' "$input" | "$py" -c '
-import json, sys
-d = json.load(sys.stdin)
-k = sys.argv[1]
-v = d.get("tool_name") if k == "tool_name" else d.get("cwd") if k == "cwd" else (d.get("tool_input") or {}).get("command")
-sys.stdout.write(v or "")
-' "$1" 2>/dev/null
-}
-
-if [ -n "$py" ]; then
-  tool=$(field tool_name)
-  cmd=$(field command)
-  cwd=$(field cwd)
-else
-  # JSON を読めないときは、push に関係しそうなら止める (判定できないのに通さない)。
-  tool='' cmd=$input cwd=''
-fi
-
-# MCP の GitHub ツールでファイルやコミットを作るもの。
-case "$tool" in
-  mcp__*)
-    if printf '%s' "$tool" | grep -qiE 'push_files|create_or_update_file|delete_file|create_commit|update_file|commit_files'; then
-      deny "$tool は GitHub の API で直接コミットするので、pre-push の検査を通らない。"
-    fi
-    exit 0 ;;
+case "$input" in
+  *push*|*send-pack*|*'gh api'*|*commit_files*|*create_or_update_file*|*delete_file*|*create_commit*|*update_file*) ;;
+  *) exit 0 ;;
 esac
 
-# git のフックを通らない書き込み。
-if printf '%s' "$cmd" | grep -qE '(^|[^[:alnum:]_-])send-pack([^[:alnum:]_-]|$)'; then
-  deny "git send-pack は pre-push を通らない。"
-fi
-if printf '%s' "$cmd" | grep -qE '(^|[^[:alnum:]_-])gh[[:space:]]+api([[:space:]]|$)' &&
-   printf '%s' "$cmd" | grep -qE '/(contents|git)/' &&
-   printf '%s' "$cmd" | grep -qE '(-X|--method)[[:space:]=]*(PUT|POST|PATCH|DELETE)|(^|[[:space:]])(-f|-F|--field|--raw-field|--input)([[:space:]=]|$)'; then
-  deny "gh api でのファイル・コミットの書き込みは pre-push を通らない。"
-fi
+py=''
+for c in python3 python 'py -3'; do
+  # shellcheck disable=SC2086 # 'py -3' は語に分けて実行する
+  if $c -c 'import json' >/dev/null 2>&1; then py=$c; break; fi
+done
+# 読めないのに通さない。ここまで来た入力は push に関係しうる。
+[ -n "$py" ] || deny "Python が無く、入力を読めないので push かどうか判定できない (Python 3 を入れる)。"
 
-# git ... push の形が含まれるか (git と push の間にオプションがあっても拾う)。
-# 'push' のように引用符で囲んだものや pre-push のようなパスの一部は拾わない。
-if ! printf '%s' "$cmd" | grep -qE '(^|[;&|(`[:space:]])git([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+push([[:space:];&|)]|$)'; then
-  exit 0
-fi
-
-[ -n "$py" ] || deny "Python が無く、コマンドを読めないので push を判定できない。"
-
-# 前後の空白を落として、決まった形かを見る。
-one=$(printf '%s' "$cmd" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-[ "$(printf '%s\n' "$one" | wc -l)" -eq 1 ] || deny "push は 1 行の git push だけで実行する (複数行のコマンドに混ぜない)。"
-# 先頭が - のものはオプションなので、<ref> としては受けない。
-ref='[A-Za-z0-9._/:+@^~{}][A-Za-z0-9._/:+@^~{}-]*'
-if ! printf '%s' "$one" | grep -qE "^git push(( -u| --set-upstream| --force-with-lease(=$ref)?| --delete| -d| --tags))*( origin)?( $ref)*$"; then
-  deny "決まった形でない git push は通さない: $one"
-fi
+# 判定の本体は隣の push-guard.py (引用符の扱いや区切りの分割を sh で書くと誤りやすいため)。
+# shellcheck disable=SC2086 # 'py -3' は語に分けて実行する
+result=$(PUSH_GUARD_INPUT=$input $py "$(dirname "$0")/push-guard.py" 2>&1) || deny "入力を読めなかった: $result"
+verdict=$(printf '%s\n' "$result" | head -1)
+rest=$(printf '%s\n' "$result" | tail -n +2)
+case "$verdict" in
+  allow) exit 0 ;;
+  deny) deny "$rest" ;;
+  check) ;;
+  *) deny "判定できなかった: $result" ;;
+esac
 
 # 以下の判定は git 自身に読ませる。このフックはエージェントのコマンドと同じ環境変数で動くので、
 # GIT_CONFIG_COUNT / GIT_CONFIG_GLOBAL などで設定を変えていても、push のときと同じ実効値が見える
 # (認証や名義を GIT_CONFIG_* で与える環境もあるので、変数があること自体では止めない)。
-cd "${cwd:-.}" 2>/dev/null || deny "作業ディレクトリ ${cwd:-} に入れない。"
+cd "${rest:-.}" 2>/dev/null || deny "作業ディレクトリ ${rest:-} に入れない。"
 hp=$(git config core.hooksPath 2>/dev/null || true)
 [ -n "$hp" ] || deny "core.hooksPath が設定されていない (共通のフックが入っていない)。"
 case "$hp" in
-  /* | [A-Za-z]:[\/]* | '~'*) ;;
+  /* | [A-Za-z]:[\\/]* | '~'*) ;;
   *) hp="$(git rev-parse --show-toplevel 2>/dev/null)/$hp" ;;
 esac
 case "$hp" in '~'*) hp="${HOME:-}${hp#\~}" ;; esac

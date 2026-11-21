@@ -20,30 +20,48 @@ run() {
   out=$(printf '%s' "$json" | bash "$G" 2>&1); rc=$?
   got=allow; [ "$rc" -eq 2 ] && got=deny; { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; } && got="error($rc)"
   if [ "$got" = "$exp" ]; then
-    printf 'ok   %-5s %s\n' "$got" "$(printf '%s' "$cmd" | head -1)"
+    printf 'ok   %-5s %-10s %s\n' "$got" "$tool" "$(printf '%s' "$cmd" | head -1)"
   else
-    printf 'FAIL %-5s (want %s) %s\n     %s\n' "$got" "$exp" "$(printf '%s' "$cmd" | head -1)" "$out"
+    printf 'FAIL %-5s %-10s (want %s) %s\n     %s\n' "$got" "$tool" "$exp" "$(printf '%s' "$cmd" | head -1)" "$out"
     fails=$((fails + 1))
   fi
 }
 
+# 通す push (決まった形)
 for c in "git push origin work/x" "git push -u origin HEAD" "git push" \
-         "git push --force-with-lease origin work/x" "git push --delete origin work/old" "git push -u origin work/a work/b"; do
+         "git push --force-with-lease origin work/x" "git push --delete origin work/old" \
+         "git push -u origin work/a work/b"; do
   run allow Bash "$c"
 done
+
+# 止める push
 for c in "git push --no-verify origin x" "git push --no-verif origin x" "git push -n origin x" \
          "git -c core.hooksPath=/dev/null push origin x" "git -C other push" "cd sub && git push" \
          "GIT_CONFIG_COUNT=1 git push" "git push origin x; echo done" "git push origin x && echo y" \
          "$(printf 'git status\ngit push origin x')" "git push origin x | cat" "(git push origin x)" \
          "git --no-pager push origin x" "git push --repo=https://example.invalid origin" \
+         '"git" push --no-verify origin x' "git push 'origin' x" \
+         "git add . && git commit -m wip && git push" "git push origin x 2>&1 | tail -5" \
          "gh api -X PUT repos/o/r/contents/a.txt -f message=m" "gh api repos/o/r/git/refs -f ref=refs/heads/x" \
          "git send-pack origin x"; do
   run deny Bash "$c"
 done
+
+# PowerShell ツールも同じ判定
+run allow PowerShell "git push origin work/x"
+run deny PowerShell "git push --no-verify origin x"
+run deny PowerShell "git push origin x; Write-Host done"
+run allow PowerShell "git stash push -m wip"
+
+# push ではないもの (誤検出しない)
 for c in "git log --grep 'push'" "cat git-hooks/pre-push" "git status" "echo push it" \
-         "gh api repos/o/r/contents/a.txt" "grep -n push README.md" "git log --oneline origin/main..HEAD"; do
+         "gh api repos/o/r/contents/a.txt" "grep -n push README.md" "git log --oneline origin/main..HEAD" \
+         'git commit -m "do not push directly to main"' "git stash push -m wip" \
+         'gh pr create --body "after git push run ci"' 'gh issue comment 1 --body "please git push again"' \
+         "grep -rn send-pack docs" "git log --grep=push" "git config --get core.hooksPath"; do
   run allow Bash "$c"
 done
+run allow Read ""
 run deny mcp__github__push_files ""
 run deny mcp__github__create_or_update_file ""
 run allow mcp__github__get_file_contents ""
@@ -59,6 +77,26 @@ git -C "$T" config nox.hooks false; run deny Bash "git push origin x"; git -C "$
   run deny Bash "git push origin x"
   exit "$fails"
 ) || fails=$((fails + 1))
+
+# Python が使えない環境では、push に関係しうる入力を止める (読めないのに通さない)。
+# 失敗するだけの python3 / python / py を PATH の先頭に置いて試す。
+NOPY="$T/nopy"
+mkdir -p "$NOPY"
+for t in python3 python py; do printf '#!/bin/sh\nexit 1\n' > "$NOPY/$t"; chmod +x "$NOPY/$t"; done
+nopy() {
+  exp=$1 json=$2
+  printf '%s' "$json" | PATH="$NOPY:$PATH" bash "$G" >/dev/null 2>&1; rc=$?
+  got=allow; [ "$rc" -eq 2 ] && got=deny
+  if [ "$got" = "$exp" ]; then
+    printf 'ok   %-5s (no python) %s\n' "$got" "$json"
+  else
+    printf 'FAIL %-5s (no python, want %s) %s\n' "$got" "$exp" "$json"
+    fails=$((fails + 1))
+  fi
+}
+nopy deny '{"tool_name":"Bash","tool_input":{"command":"git push --no-verify origin x"},"cwd":"."}'
+nopy deny '{"tool_name":"mcp__github__push_files","tool_input":{},"cwd":"."}'
+nopy allow '{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"."}'
 
 echo "failures: $fails"
 [ "$fails" -eq 0 ]

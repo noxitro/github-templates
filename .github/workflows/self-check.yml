@@ -21,7 +21,7 @@ jobs:
   workflow-lint:
     uses: ./.github/workflows/workflow-lint.yml
     with:
-      python-paths: "git-hooks scripts templates/.github/scripts"
+      python-paths: "git-hooks scripts templates/.github/scripts templates/.claude/hooks"
 
   file-format:
     uses: ./.github/workflows/file-format.yml
@@ -46,7 +46,7 @@ jobs:
             bash -n "$f" && echo "ok: $f"
           done
           python3 -m py_compile git-hooks/check-external-names.py
-          python3 -m py_compile git-hooks/fix-format.py scripts/discord_webhook.py scripts/file-format/*.py templates/.github/scripts/*.py
+          python3 -m py_compile git-hooks/fix-format.py scripts/discord_webhook.py scripts/file-format/*.py templates/.github/scripts/*.py templates/.claude/hooks/*.py
       # Windows の sh は CRLF のスクリプトを読めない。.gitattributes で LF に固定しているが、
       # 既に CRLF で入ってしまったものはそれでは直らないので、ここで止める。
       - name: Line endings

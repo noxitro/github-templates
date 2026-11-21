@@ -34,7 +34,7 @@ files_of() {
     workflow-lint) echo ".github/workflows/workflow-lint.yml" ;;
     dependency-review) echo ".github/workflows/dependency-review.yml" ;;
     claude) echo ".github/workflows/claude.yml" ;;
-    session-start) echo ".claude/settings.json .claude/hooks/session-start.sh .claude/hooks/push-guard.sh" ;;
+    session-start) echo ".claude/settings.json .claude/hooks/session-start.sh .claude/hooks/push-guard.sh .claude/hooks/push-guard.py" ;;
     *) return 1 ;;
   esac
 }
