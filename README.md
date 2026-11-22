@@ -16,7 +16,7 @@
 | `.github/workflows/file-format.yml` | BOM と改行コードの事故 (一括変換・混在・BOM の付け外し) を拾う共通ワークフロー |
 | `.github/workflows/workflow-lint.yml` | ワークフローの静的検査 (actionlint) と Python スクリプトの ruff の共通ワークフロー |
 | `.github/workflows/dependency-review.yml` | PR で増える依存の脆弱性とライセンスを検査する共通ワークフロー |
-| `.github/workflows/claude-agent.yml` | PR / Issue のコメント (`/claude ...`) で Claude にレビューや質問をさせる共通ワークフロー |
+| `.github/workflows/claude-agent.yml` | PR のコメント (`/claude ...`) で Claude にレビューや質問をさせる共通ワークフロー |
 | `.github/workflows/self-check.yml` | このリポジトリ自身の検査 (共通ワークフローを変更した版のまま動かす) |
 | `scripts/file-format/` | `file-format.yml` の検査本体と、BOM を外す `strip-bom.py` |
 | `scripts/discord_webhook.py` | 共通ワークフローから失敗を Discord に流す |
@@ -385,8 +385,10 @@ python3 ~/.config/nox/github-templates/git-hooks/check-external-names.py --hash 
 
 ## Claude (コメントでレビューを頼む)
 
-PR / Issue のコメントの先頭に `/claude` と書き、空白か改行を挟んで頼むと、Claude が差分をレビューしたり質問に答えたりする
+PR のコメントの先頭に `/claude` と書き、空白か改行を挟んで頼むと、Claude が差分をレビューしたり質問に答えたりする
 (例: `/claude レビューして`)。本体は `.github/workflows/claude-agent.yml` で、各リポジトリには呼び出し側だけを置く。
+Issue では動かさない。Claude のコメントは push 前の検査を通らないので、書ける場所を PR に絞っている
+(トークンに Issues の権限を付けない)。
 
 ### リポジトリに入れる
 
@@ -398,7 +400,7 @@ PR / Issue のコメントの先頭に `/claude` と書き、空白か改行を�
    - `AGENT_APP_ID` / `AGENT_APP_PRIVATE_KEY` (任意): 自前の GitHub App の App ID と秘密鍵。
      両方あるとその App のトークンで動き、コメントがその App の名義になる。
      無ければ GITHUB_TOKEN で動き、github-actions[bot] の名義になる。
-     App には Contents と Actions の Read、Pull requests / Issues の Read and write を与え、対象のリポジトリにインストールしておく
+     App には Contents と Actions の Read、Pull requests の Read and write を与え、対象のリポジトリにインストールしておく
      (App に無い権限を求めるとトークンの発行が失敗する)
      (共通側でもトークンをその権限に絞って発行する)。
 
