@@ -12,6 +12,7 @@
 #              secret-scan / file-format / workflow-lint / dependency-review / claude / session-start
 #   OVERWRITE  true なら、雛形と中身の違う既存ファイルも上書きする。
 #              .claude/settings.json はほかの設定も入るファイルなので、true でも上書きしない
+#              (以前の雛形そのままのときだけ、この指定に関わらず新しい雛形に置き換える)
 #   DRY_RUN    1 なら push も PR もしない
 #
 # SECURITY.md・PR テンプレート・dependabot.yml はリポジトリごとに中身を直すものなので、ここでは配らない。
@@ -24,6 +25,9 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 src="$root/templates"
 branch=templates/apply
 self=github-templates
+# 以前の雛形の .claude/settings.json (CR を除いた内容の sha256、1 行 1 つ)。これと同じ中身なら新しい雛形に置き換える。
+# 雛形の settings.json を変えるときは、変える前のものをここに足す。
+old_settings_shas="5dfecbd0df59e920584087b635cabb0e9796797900f017fd9fe4c9bd24e15722"
 # git の資格情報は gh のログインから取る (gh auth setup-git をしていない環境でも push できるように)
 git_gh() { git -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"; }
 
@@ -34,7 +38,7 @@ files_of() {
     workflow-lint) echo ".github/workflows/workflow-lint.yml" ;;
     dependency-review) echo ".github/workflows/dependency-review.yml" ;;
     claude) echo ".github/workflows/claude.yml" ;;
-    session-start) echo ".claude/settings.json .claude/hooks/session-start.sh" ;;
+    session-start) echo ".claude/settings.json .claude/hooks/session-start.sh .claude/hooks/push-guard.sh .claude/hooks/push-guard.py" ;;
     *) return 1 ;;
   esac
 }
@@ -51,9 +55,9 @@ todo_of() {
     dependency-review)
       echo "- Dependency review: 依存関係グラフ (Settings → Code security) が有効か確かめる" ;;
     claude)
-      echo "- Claude: Settings → Secrets and variables → Actions に \`CLAUDE_CODE_OAUTH_TOKEN\` を登録する (\`claude setup-token\` で得る)。Claude GitHub App がこのリポジトリに入っているかも確かめる。issue_comment で起動するので、既定ブランチに入ってから効く" ;;
+      echo "- Claude: Settings → Secrets and variables → Actions に \`CLAUDE_CODE_OAUTH_TOKEN\` を登録する (\`claude setup-token\` で得る)。Claude は push しない (Contents は Read)。issue_comment で起動するので、既定ブランチに入ってから効く" ;;
     session-start)
-      echo "- session-start: Claude Code on the web のセッションでだけ動く (手元では何もしない)。手元のフックは github-templates の README の手順で入れる" ;;
+      echo "- session-start: SessionStart は Claude Code on the web のセッションでだけ動く (手元では何もしない)。PreToolUse の push-guard は手元でも動き、共通のフックが入っていない端末からの push を止める。手元のフックは github-templates の README の手順で入れる" ;;
   esac
 }
 
@@ -107,13 +111,17 @@ if [ "${1:-}" = "--one" ]; then
           continue
         fi
         if [ "$f" = ".claude/settings.json" ]; then
-          if grep -q 'session-start.sh' "$dst"; then
+          if grep -q 'session-start.sh' "$dst" && grep -q 'push-guard.sh' "$dst"; then
             continue
           fi
-          skipped+=("\`$f\`: 既にほかの設定がある。雛形の SessionStart フックを手で足す")
-          continue
-        fi
-        if [ "${OVERWRITE:-false}" != "true" ]; then
+          # 以前の雛形そのままなら、リポジトリ固有の設定は無いので新しい雛形に置き換える
+          # (置き換えないと、push-guard のファイルだけが入って設定が付かない)。
+          sum=$(tr -d '\r' <"$dst" | sha256sum 2>/dev/null | cut -d' ' -f1) || sum=''
+          if ! grep -qxF "$sum" <<<"$old_settings_shas"; then
+            skipped+=("\`$f\`: 既にほかの設定がある。雛形の SessionStart / PreToolUse フックと permissions.deny を手で足す")
+            continue
+          fi
+        elif [ "${OVERWRITE:-false}" != "true" ]; then
           skipped+=("\`$f\`: 雛形と中身が違う (リポジトリ固有の変更かもしれないので上書きしない)")
           continue
         fi

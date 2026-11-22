@@ -1,4 +1,4 @@
-# Claude (PR / Issue で /claude と書いたときだけ動く)。本体は noxitro/github-templates の共通ワークフロー。
+# Claude (PR で /claude と書いたときだけ動く。Issue では動かない)。本体は noxitro/github-templates の共通ワークフロー。
 # 使い方・認証・権限の説明は共通側 (.github/workflows/claude-agent.yml) の冒頭。
 #
 # Secret: CLAUDE_CODE_OAUTH_TOKEN (必須)、AGENT_APP_ID / AGENT_APP_PRIVATE_KEY (任意、自前の GitHub App)。
@@ -22,10 +22,9 @@ jobs:
     # 共通側の job が使う権限。呼び出し側で与えないと共通側では広げられない。
     permissions:
       contents: read
-      pull-requests: write   # レビューコメントを書く
-      issues: write          # 会話欄に返信する
-      id-token: write        # Claude GitHub App の認証に使う
+      pull-requests: write   # レビューコメントと、会話欄への返信を書く (Issues の権限は与えない)
       actions: read          # CI の結果を読んで答えられるように
+    # contents は read のまま。push はさせない (共通側の冒頭: Actions には push 前の検査が無い)。
     uses: noxitro/github-templates/.github/workflows/claude-agent.yml@main
     # 共通側で使う Secret だけを渡す (secrets: inherit だとリポジトリの Secret がすべて渡る)。
     # 無いものは空のまま渡り、共通側で扱う。

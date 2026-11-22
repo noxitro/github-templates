@@ -213,7 +213,7 @@ class Terms:
 
 
 def load_terms() -> Terms | None:
-    # 組織の文脈を書いてよい非公開リポジトリ (フックが org-context-allowed.txt で判定して渡す)。
+    # 組織の文脈を書いてよい非公開リポジトリ (フックが手元の org-context-allowed.txt で判定して渡す)。
     if os.environ.get("NOX_ALLOW_ORG_CONTEXT") == "1":
         return None
     terms = Terms()
